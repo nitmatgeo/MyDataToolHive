@@ -25,4 +25,9 @@ Quick start::
 from etl_monitor.framework import ETLMonitorFramework
 
 __all__ = ["ETLMonitorFramework"]
-__version__ = "0.1.0"
+
+try:
+    from importlib.metadata import version as _pkg_version
+    __version__ = _pkg_version("databricks-etl-monitor")
+except Exception:
+    __version__ = "unknown"

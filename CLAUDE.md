@@ -101,39 +101,66 @@ def _fqn(self, name: str) -> str:
 
 ## Status values — exactly these four strings
 
-```
-NQUE    Not queued (waiting)
-RQUE    Retry queued (after reset from FAIL)
-DONE    Completed successfully
-FAIL    Failed
-```
+| Value | Full name | Meaning |
+|-------|-----------|---------|
+| `NQUE` | New Queue | Task created, first attempt, awaiting execution |
+| `RQUE` | Re-Queue | Reset from FAIL, retry attempt queued |
+| `DONE` | Done | Completed successfully |
+| `FAIL` | Failed | Failed — awaiting retry or investigation |
 
-State machine: `NQUE → DONE | NQUE → FAIL → RQUE → DONE`
+State machine:
+```
+NQUE → DONE
+NQUE → FAIL → RQUE → DONE
+NQUE → FAIL → RQUE → FAIL → [manual status_reset()] → RQUE → DONE
+```
 
 ---
 
 ## ParameterType values — exactly these four
 
-| Value | Active column | Auto-advance on DONE? |
-|-------|---------------|----------------------|
-| `DELTA_DATE` | `ValueDateTime` | Yes — to task `StartTime` |
-| `DELTA_ID` | `ValueINT` | No — call `advance_watermark()` manually |
-| `FLAG` | `ValueBIT` | No |
-| `SYSTEM` | `ValueDateTime` | No — via `set_processing_mode()` only |
+| Value | Active column | Auto-advance on DONE? | Bulk mode |
+|-------|--------------|----------------------|-----------|
+| `DELTA_DATE` | `ValueDateTime` | Yes — set to task `StartTime` | `ValueDateTime = NULL` |
+| `DELTA_ID` | `ValueINT` | No — call `advance_watermark()` | `ValueINT = 0` |
+| `FLAG` | `ValueBIT` | No — read freely | Not applicable |
+| `SYSTEM` | `ValueDateTime` | No — `set_processing_mode()` only | `NULL` = live date |
 
 **KNOWN LIMITATION — DELTA_ID:** Framework cannot auto-detect the max integer ID from
 the source dataset. Developer must call `advance_watermark()` explicitly after load.
+
+**Future enhancement:** Accept an optional `new_delta_id` parameter in `end_task()` so the
+developer can pass the value in a single call without a separate `advance_watermark()` call.
+
+**Original framework note:** The original SQL Server framework used
+`ParameterDescription LIKE 'Delta Date;%'` string matching to detect watermark type.
+This was fragile and hard to query. The DBX version replaces it with an explicit
+`ParameterType` column — one of exactly four values above.
 
 ---
 
 ## WorkFlowID semantics
 
-```
-0  Initiation task — overall run status marker; one per process; always TaskID=0, SequenceID=0
-1  First workflow pass (main load)
-2  Second pass (enrichment / second data iteration)
-N  Nth iteration over same data with different scope
-```
+| WorkFlowID | Meaning |
+|-----------|---------|
+| 0 | Initiation task — always `TaskID=0`, `SequenceID=0`; one per process; overall run status indicator. Reset to NQUE on any mandatory FAIL. |
+| 1 | First workflow pass (main load) |
+| 2 | Second pass (enrichment / additional fields / second data iteration) |
+| N | Nth iteration over the same data with a different scope |
+
+## Sequence stages (FRAMEWORK-MANAGED — auto-seeded by `setup()`)
+
+| SequenceID | SequenceCode | Description | SortOrder |
+|-----------|-------------|-------------|-----------|
+| 0 | `LOAD_GO` | Initiating ETL Processing | 0 |
+| 1 | `LOAD_DB_CONFIG` | Load Configuration Data from source | 1 |
+| 2 | `LOAD_DB_TRAN` | Load Transactional Data from source (staging) | 2 |
+| 3 | `LOAD_DIM` | Process Master Data — validate staged dimensions | 3 |
+| 4 | `LOAD_TRAN` | Process Transactional Data — validate staged transactions | 4 |
+| 5 | `PRE_PROCESS` | Functional Logic — business logic and derivations | 5 |
+| 6 | `PROCESS_DATA` | Core Data Transformation — output / data mart tables | 6 |
+
+Custom stages: `SequenceID >= 10`. Framework reserves 0–9.
 
 ## SequenceID parallelism
 
@@ -141,12 +168,35 @@ All active tasks sharing `(WorkFlowID, SequenceID)` for a process are **intended
 The ADF ForEach / Databricks Workflow fan-out handles the actual parallelism.
 Developer designs the fan-out accordingly.
 
+## ProcessLoad scoping (enhancement over original SQL Server framework)
+
+Original framework used `(ProjectCode, ParameterName)` as the parameter key. This caused
+namespace collision when multiple processes under the same project share parameter names
+(e.g. `CORP / HR_DAILY / LoadEmployees` and `CORP / FIN_MONTHLY / LoadEmployees`).
+
+The DBX version adds `ProcessLoad` to the composite key across all user-managed tables.
+HR_DAILY and FIN_MONTHLY are fully independent — their tasks, watermarks, and execution
+histories do not interact.
+
 ## SequenceID ranges
 
 ```
 0–9    Framework-reserved (built-in LOAD_GO → PROCESS_DATA stages)
 ≥ 10   Custom / project-specific stages
 ```
+
+---
+
+## Stored procedure equivalence (for teams migrating from SQL Server)
+
+| Original stored procedure | Python method | Notes |
+|--------------------------|--------------|-------|
+| `p_ETLProcessingSteps` (GenerateMode=1) | `generate_execution_steps()` | INSERT NQUE rows for all active tasks |
+| `p_ETLOrchestrationSteps` | `get_pending_tasks()` | Returns non-DONE tasks; auto-generates on first call |
+| `p_ETLProcessingStatusUpdate` | `end_task()` / `fail_task()` | Status + timing write-back; DELTA_DATE auto-advance on DONE |
+| `p_ETLProcessingStatusGet` | `get_status()` | Summary or task-level detail; `summary_mode=True` for rollup |
+| `p_ETLProcessingStatusReset` | `status_reset()` | Bulk or specific task reset; always resets initiation row |
+| `p_ETLconfigProcessingMode` | `set_processing_mode()` | Historic mode, live mode, bulk mode, specific param |
 
 ---
 
@@ -168,6 +218,39 @@ WHEN NOT MATCHED THEN INSERT (...) VALUES (...);
 
 ---
 
+## Key design patterns
+
+### Pattern A — Composite execution key
+`(ProcessingDate, ProjectCode, ProcessLoad, ExecutionID, WorkFlowID, TaskID, SequenceID, Attempts)`
+Every row in `ETLProcessingSteps` is uniquely addressable for replay, retry, and historical comparison.
+
+### Pattern B — INSERT-ONLY MERGE for config writes
+All config upserts use `MERGE INTO ... WHEN NOT MATCHED THEN INSERT`.
+Safe to re-run without overwriting existing user modifications.  Never add `WHEN MATCHED THEN UPDATE`
+to config MERGE statements.
+
+### Pattern C — COALESCE in MERGE ON clause
+```sql
+ON  COALESCE(tgt.ProjectCode,  '') = COALESCE(src.ProjectCode,  '')
+AND COALESCE(tgt.ProcessLoad,  '') = COALESCE(src.ProcessLoad,  '')
+AND COALESCE(tgt.ParameterName,'') = COALESCE(src.ParameterName,'')
+```
+Handles nullable string keys safely.  Never use `IS DISTINCT FROM` or `NOT (col <=> val)`.
+
+### Pattern D — `_fqn()` helper
+Identical to DQ framework pattern.  Backtick-quoting handles names with hyphens or reserved words.
+
+### Pattern E — Context manager (`with monitor.task(...)`)
+Writes NQUE at entry, DONE on clean exit, FAIL on exception.  UUID generated per run via
+`ETLMonitorFramework.generate_execution_id()`.
+
+### Pattern F — Snapshot columns in ETLProcessingSteps
+`TaskName`, `SequenceCode`, `TaskMandatory`, `SourceSystemCode` copied from config tables
+at `generate_execution_steps()` time.  History stays accurate even if the task catalogue
+is later changed or tasks are deactivated.
+
+---
+
 ## ADF integration
 
 `v_watermarks.ActiveValue` is a resolved STRING suitable for ADF Lookup activity:
@@ -182,6 +265,31 @@ ADF Copy Activity source expression:
 @concat('SELECT * FROM dbo.Products WHERE ModifiedDate > ''',
         activity('GetWatermark').output.firstRow.ActiveValue, '''')
 ```
+
+### ADF write-back via utility notebooks
+ADF calls a Databricks Notebook activity passing widget parameters.
+Three lightweight utility notebooks are created per project (not shipped with this package):
+- `etl_start_task.py` — widgets: `execution_id`, `project_code`, `process_load`, `task_id`,
+  `workflow_id`, `sequence_id`, `processing_date`, `source_type` → calls `monitor.start_task(...)`.
+- `etl_end_task.py` — same widgets + `log_message`, `log_type` → calls `monitor.end_task(...)`.
+- `etl_fail_task.py` — same widgets + error details → calls `monitor.fail_task(...)`.
+
+### ADF ForEach over pending tasks
+ADF ForEach iterates `get_pending_tasks()` output.
+Tasks sharing the same `SequenceID` are dispatched in parallel (ADF parallel ForEach).
+After each SequenceID stage completes, ADF checks `v_mandatoryBlockers` before advancing.
+
+---
+
+## What was NOT ported
+
+| Original | Reason not ported |
+|----------|------------------|
+| Trigger / orchestration logic | Out of scope — this framework observes only, never triggers |
+| `#DELTAPARAMETER#` string substitution | Replaced by `v_watermarks.ActiveValue` |
+| `ADFMain` / `ADFPipelines` / `ADFMetaData` | ADF pipeline driver config — not needed for monitoring |
+| `ETLconfigNotifications` | Replace with Databricks SQL Alerts or Lakeview dashboards |
+| T-SQL stored procedures | Replaced entirely by Python class methods |
 
 ---
 
