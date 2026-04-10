@@ -3,8 +3,6 @@ ETL Monitor — Delta Table DDL
 ==============================
 All table DDL statements for the ETL Monitoring Framework.
 
-Equivalent to 02_delta_tables_ddl.sql (Databricks SQL version).
-
 Column names follow the original SQL Server framework naming exactly:
   TaskID, WorkFlowID, Attempts (plural), TaskMandatory, SequenceID
 
@@ -13,6 +11,14 @@ Constraint notes
 Databricks Delta Lake does not enforce PK/FK at DDL level.
 Uniqueness is enforced application-side via INSERT-ONLY MERGE statements
 which key on composite natural keys — equivalent to SQL Server PK constraints.
+
+DEFAULT values
+--------------
+Column DEFAULT expressions (DEFAULT current_timestamp(), DEFAULT TRUE, etc.) are NOT
+used in the DDL — Databricks requires the delta.feature.allowColumnDefaults table
+property to be explicitly enabled before column defaults work, which is not guaranteed
+across all DBR versions and cluster configs.
+All default values are passed explicitly by the Python INSERT/MERGE statements instead.
 
 Table Classification
 --------------------
@@ -55,12 +61,16 @@ DDL_STATEMENTS: dict[str, str] = {
                 COMMENT 'Full description of what this stage covers',
             SortOrder           INT
                 COMMENT 'Display ordering for dashboards (mirrors SequenceID by default)',
-            IsActive            BOOLEAN    DEFAULT TRUE
+            IsActive            BOOLEAN
                 COMMENT 'Soft-delete — FALSE removes stage from new runs without affecting history',
-            CreatedOn           TIMESTAMP  DEFAULT current_timestamp(),
-            CreatedBy           STRING     DEFAULT current_user(),
-            LastUpdatedOn       TIMESTAMP  DEFAULT current_timestamp(),
-            LastUpdatedBy       STRING     DEFAULT current_user()
+            CreatedOn           TIMESTAMP
+                COMMENT 'Row creation timestamp',
+            CreatedBy           STRING
+                COMMENT 'User who created the row',
+            LastUpdatedOn       TIMESTAMP
+                COMMENT 'Last modification timestamp',
+            LastUpdatedBy       STRING
+                COMMENT 'User who last modified the row'
         )
         USING DELTA
         COMMENT 'Workflow stage definitions — framework-managed, seeded by setup(). Tasks sharing a SequenceID run in parallel. Custom stages: SequenceID >= 10.'
@@ -82,14 +92,18 @@ DDL_STATEMENTS: dict[str, str] = {
                 COMMENT 'What this process loads or transforms',
             ProcessOwner       STRING
                 COMMENT 'Team or individual responsible for this process',
-            LoadFrequency      STRING     DEFAULT 'D'
+            LoadFrequency      STRING
                 COMMENT 'D=Daily  W=Weekly  M=Monthly  A=Ad-hoc',
-            IsActive           BOOLEAN    DEFAULT TRUE
+            IsActive           BOOLEAN
                 COMMENT 'Soft-delete',
-            CreatedOn          TIMESTAMP  DEFAULT current_timestamp(),
-            CreatedBy          STRING     DEFAULT current_user(),
-            LastUpdatedOn      TIMESTAMP  DEFAULT current_timestamp(),
-            LastUpdatedBy      STRING     DEFAULT current_user()
+            CreatedOn          TIMESTAMP
+                COMMENT 'Row creation timestamp',
+            CreatedBy          STRING
+                COMMENT 'User who created the row',
+            LastUpdatedOn      TIMESTAMP
+                COMMENT 'Last modification timestamp',
+            LastUpdatedBy      STRING
+                COMMENT 'User who last modified the row'
         )
         USING DELTA
         COMMENT 'Central process registry — user-managed. Register each domain process here before creating tasks. PK: (ProjectCode, ProcessLoad).'
@@ -135,18 +149,22 @@ DDL_STATEMENTS: dict[str, str] = {
                 COMMENT 'ADF pipeline name, Databricks job_id, or notebook workspace path',
             SourceSystemCode        STRING
                 COMMENT 'Links to ETLconfigParameters.ParameterName — which watermark to advance on DONE. NULL for full-load tasks.',
-            LoadFrequency           STRING     DEFAULT 'D'
+            LoadFrequency           STRING
                 COMMENT 'D=Daily  W=Weekly  M=Monthly',
-            TaskMandatory           BOOLEAN    DEFAULT TRUE
+            TaskMandatory           BOOLEAN
                 COMMENT 'TRUE = processing must not advance past this SequenceID stage if this task FAILs',
             ExpectedDurationSeconds INT
                 COMMENT 'SLA baseline — v_taskDetail flags rows where DurationSeconds exceeds this',
-            IsActive                BOOLEAN    DEFAULT TRUE
+            IsActive                BOOLEAN
                 COMMENT 'FALSE = skip from new runs without deleting history',
-            CreatedOn               TIMESTAMP  DEFAULT current_timestamp(),
-            CreatedBy               STRING     DEFAULT current_user(),
-            LastUpdatedOn           TIMESTAMP  DEFAULT current_timestamp(),
-            LastUpdatedBy           STRING     DEFAULT current_user()
+            CreatedOn               TIMESTAMP
+                COMMENT 'Row creation timestamp',
+            CreatedBy               STRING
+                COMMENT 'User who created the row',
+            LastUpdatedOn           TIMESTAMP
+                COMMENT 'Last modification timestamp',
+            LastUpdatedBy           STRING
+                COMMENT 'User who last modified the row'
         )
         USING DELTA
         COMMENT 'Task catalogue — user-managed. PK: (TaskID, WorkFlowID, ProjectCode, ProcessLoad). Tasks sharing SequenceID run in parallel.'
@@ -183,10 +201,14 @@ DDL_STATEMENTS: dict[str, str] = {
                 COMMENT 'Active for DELTA_DATE and SYSTEM. NULL = bulk mode (DELTA_DATE) or live date (SYSTEM).',
             ValueBIT             BOOLEAN
                 COMMENT 'Active for FLAG.',
-            CreatedOn            TIMESTAMP  DEFAULT current_timestamp(),
-            CreatedBy            STRING     DEFAULT current_user(),
-            LastUpdatedOn        TIMESTAMP  DEFAULT current_timestamp(),
-            LastUpdatedBy        STRING     DEFAULT current_user()
+            CreatedOn            TIMESTAMP
+                COMMENT 'Row creation timestamp',
+            CreatedBy            STRING
+                COMMENT 'User who created the row',
+            LastUpdatedOn        TIMESTAMP
+                COMMENT 'Last modification timestamp',
+            LastUpdatedBy        STRING
+                COMMENT 'User who last modified the row'
         )
         USING DELTA
         COMMENT 'Delta watermarks and config flags — user-managed. ParameterType drives behaviour: DELTA_DATE auto-advances on DONE; DELTA_ID requires advance_watermark(); FLAG is free config; SYSTEM is SYSDT only.'
@@ -222,7 +244,7 @@ DDL_STATEMENTS: dict[str, str] = {
                 COMMENT 'FK to ETLconfigTasks.TaskID',
             SequenceID       INT        NOT NULL
                 COMMENT 'FK to ETLconfigSequence.SequenceID',
-            Attempts         INT        NOT NULL  DEFAULT 0
+            Attempts         INT        NOT NULL
                 COMMENT '0=first attempt, 1=first retry, N=Nth retry',
             Status           STRING     NOT NULL
                 COMMENT 'NQUE | RQUE | DONE | FAIL',
@@ -239,8 +261,8 @@ DDL_STATEMENTS: dict[str, str] = {
             SourceType       STRING     COMMENT 'ADF_PIPELINE | DBX_JOB | DBX_NOTEBOOK | DATAFLOW',
             SourceRunID      STRING     COMMENT 'ADF ActivityRunId or Databricks run_id',
             ClusterID        STRING     COMMENT 'Databricks cluster ID — cost attribution',
-            LastUpdatedOn    TIMESTAMP  DEFAULT current_timestamp(),
-            LastUpdatedBy    STRING     DEFAULT current_user()
+            LastUpdatedOn    TIMESTAMP  COMMENT 'Last modification timestamp',
+            LastUpdatedBy    STRING     COMMENT 'User who last modified the row'
         )
         USING DELTA
         PARTITIONED BY (ProcessingDate)

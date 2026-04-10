@@ -4,10 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "databricks-etl-monitor"
-version = "0.1.0"
+version = "0.1.0a5"
 description = "Metadata-driven ETL Process Monitoring Framework for Databricks / Delta Lake"
 readme = "README.md"
-license = "MIT"
 requires-python = ">=3.9"
 authors = [
     { name = "Nitin Mathew George" }
@@ -16,6 +15,7 @@ keywords = ["databricks", "delta-lake", "etl-monitoring", "pyspark", "adf", "uni
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
+    "License :: OSI Approved :: MIT License",
 ]
 dependencies = []
 

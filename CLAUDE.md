@@ -83,11 +83,19 @@ ProcessingDate  ExecutionID               LogMessage
 
 ### Audit columns — ALL user-managed config tables have all four
 ```
-CreatedOn      TIMESTAMP    DEFAULT current_timestamp()
-CreatedBy      STRING       DEFAULT current_user()
-LastUpdatedOn  TIMESTAMP    DEFAULT current_timestamp()
-LastUpdatedBy  STRING       DEFAULT current_user()
+CreatedOn      TIMESTAMP
+CreatedBy      STRING
+LastUpdatedOn  TIMESTAMP
+LastUpdatedBy  STRING
 ```
+
+**CRITICAL — no DEFAULT expressions in DDL.**
+`DEFAULT current_timestamp()` / `DEFAULT current_user()` / `DEFAULT TRUE` etc. require
+the `delta.feature.allowColumnDefaults` table property to be explicitly enabled — not
+guaranteed across all DBR versions. This causes `WRONG_COLUMN_DEFAULTS_FOR_DELTA_FEATURE_NOT_ENABLED`
+on table creation.
+**All default values are passed explicitly in the Python INSERT/MERGE statements instead.**
+Never add `DEFAULT <expr>` to any column in `DDL_STATEMENTS`.
 
 ### FQN — always backtick-quoted
 ```python
@@ -212,9 +220,15 @@ AND COALESCE(tgt.ProcessLoad, '') = COALESCE(src.ProcessLoad, '')
 WHEN NOT MATCHED THEN INSERT (...) VALUES (...);
 ```
 
-**Never use `WHEN MATCHED THEN UPDATE`** in config writes — preserves existing data.
-**Always use `COALESCE`** for nullable string keys in `MERGE ON` conditions — never
-`IS DISTINCT FROM` or `NOT (col <=> val)`.
+**MERGE pattern for config writes:**
+- `WHEN MATCHED AND (changes detected) THEN UPDATE` — updates mutable fields only.
+- `WHEN NOT MATCHED THEN INSERT` — inserts new row.
+- Natural keys (TaskID, WorkFlowID, ProjectCode, ProcessLoad, ParameterName) and
+  audit creation fields (CreatedOn, CreatedBy) are **never overwritten on UPDATE**.
+- Watermark value columns (ValueDateTime, ValueINT, ValueBIT) in ETLconfigParameters
+  are **never overwritten on UPDATE** — use `advance_watermark()` or `set_processing_mode()`.
+- **Always use `COALESCE`** for nullable string keys in `MERGE ON` conditions — never
+  `IS DISTINCT FROM` or `NOT (col <=> val)`.
 
 ---
 

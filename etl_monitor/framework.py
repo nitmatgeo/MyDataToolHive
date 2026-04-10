@@ -47,7 +47,6 @@ Enterprise / ADF consumption:
 
 from __future__ import annotations
 
-import importlib.resources
 import logging
 import os
 import shutil
@@ -176,8 +175,25 @@ class ETLMonitorFramework:
         load_frequency: str = "D",
     ) -> "ETLMonitorFramework":
         """
-        Register a named process in ETLconfigProcess via INSERT-ONLY MERGE.
-        Will not overwrite an existing row.  Returns self for chaining.
+        Register (or update) a domain process in ETLconfigProcess.
+
+        **Mandatory parameters**
+        - ``project_code``  — project / portfolio code, e.g. ``"CORP"``
+        - ``process_load``  — process identifier, e.g. ``"HR_DAILY"``
+
+        **Optional parameters**
+        - ``name``           — human-readable display name (default: ``""``)
+        - ``description``    — what this process loads or transforms (default: ``""``)
+        - ``owner``          — team or individual responsible (default: ``""``)
+        - ``load_frequency`` — ``"D"`` Daily, ``"W"`` Weekly, ``"M"`` Monthly, ``"A"`` Ad-hoc (default: ``"D"``)
+
+        MERGE behaviour:
+          - INSERT on first call (new ProjectCode/ProcessLoad).
+          - UPDATE mutable fields (ProcessName, ProcessDescription, ProcessOwner,
+            LoadFrequency) on subsequent calls if any value changed.
+          - CreatedOn / CreatedBy are never overwritten.
+
+        Returns self for optional method chaining.
         """
         fqn = self._fqn("ETLconfigProcess")
         self.spark.sql(f"""
@@ -192,6 +208,18 @@ class ETLMonitorFramework:
             ) AS src
             ON  COALESCE(tgt.ProjectCode,'') = COALESCE(src.ProjectCode,'')
             AND COALESCE(tgt.ProcessLoad, '') = COALESCE(src.ProcessLoad, '')
+            WHEN MATCHED AND (
+                COALESCE(tgt.ProcessName,        '') <> COALESCE(src.ProcessName,        '') OR
+                COALESCE(tgt.ProcessDescription, '') <> COALESCE(src.ProcessDescription, '') OR
+                COALESCE(tgt.ProcessOwner,       '') <> COALESCE(src.ProcessOwner,       '') OR
+                COALESCE(tgt.LoadFrequency,      '') <> COALESCE(src.LoadFrequency,      '')
+            ) THEN UPDATE SET
+                tgt.ProcessName        = src.ProcessName,
+                tgt.ProcessDescription = src.ProcessDescription,
+                tgt.ProcessOwner       = src.ProcessOwner,
+                tgt.LoadFrequency      = src.LoadFrequency,
+                tgt.LastUpdatedOn      = current_timestamp(),
+                tgt.LastUpdatedBy      = current_user()
             WHEN NOT MATCHED THEN INSERT (
                 ProjectCode, ProcessLoad, ProcessName, ProcessDescription,
                 ProcessOwner, LoadFrequency, IsActive,
@@ -223,14 +251,36 @@ class ETLMonitorFramework:
         expected_duration_seconds: Optional[int] = None,
     ) -> "ETLMonitorFramework":
         """
-        Register a task in ETLconfigTasks via INSERT-ONLY MERGE.
+        Register (or update) a task in ETLconfigTasks.
 
-        ``task_id`` is user-assigned — developer controls ID values, matching
-        the SQL Server IDENTITY INSERT OFF equivalent.  The MERGE ON composite
-        key enforces uniqueness.
+        **Mandatory parameters**
+        - ``project_code``  — FK to ETLconfigProcess.ProjectCode, e.g. ``"CORP"``
+        - ``process_load``  — FK to ETLconfigProcess.ProcessLoad, e.g. ``"HR_DAILY"``
+        - ``task_id``       — **user-assigned integer** — you control the ID value.
+                              Unique within (ProjectCode, ProcessLoad, WorkFlowID).
+                              Initiation task is always task_id=0.
+        - ``workflow_id``   — 0=Initiation, 1=First pass, 2=Second pass, N=Nth pass
+        - ``sequence_id``   — FK to ETLconfigSequence.SequenceID.
+                              Tasks sharing the same SequenceID run in parallel.
+                              0=LOAD_GO, 1=LOAD_DB_CONFIG, 2=LOAD_DB_TRAN,
+                              3=LOAD_DIM, 4=LOAD_TRAN, 5=PRE_PROCESS, 6=PROCESS_DATA.
+                              Custom stages: SequenceID >= 10.
+        - ``task_name``     — short descriptive name
 
-        ``source_system_code`` must match a ParameterName in ETLconfigParameters
-        for the same (ProjectCode, ProcessLoad).  Leave empty for full-load tasks.
+        **Optional parameters**
+        - ``source_type``               — ``"DBX_NOTEBOOK"`` | ``"DBX_JOB"`` | ``"ADF_PIPELINE"`` | ``"DATAFLOW"`` (default: ``""``)
+        - ``source_identifier``         — notebook path, job ID, or ADF pipeline name (default: ``""``)
+        - ``source_system_code``        — matches ETLconfigParameters.ParameterName for watermark advance.
+                                          Leave empty (``""``) for full-load tasks with no delta watermark. (default: ``""``)
+        - ``task_description``          — longer description (default: ``""``)
+        - ``load_frequency``            — ``"D"`` | ``"W"`` | ``"M"`` (default: ``"D"``)
+        - ``task_mandatory``            — if True, a FAIL blocks downstream SequenceID stages (default: ``True``)
+        - ``expected_duration_seconds`` — SLA baseline; v_taskDetail flags breaches (default: ``None``)
+
+        MERGE behaviour:
+          - INSERT on first call (new composite key).
+          - UPDATE mutable fields on subsequent calls if any value changed.
+          - TaskID, WorkFlowID, ProjectCode, ProcessLoad, CreatedOn, CreatedBy never overwritten.
 
         Returns self for optional method chaining.
         """
@@ -259,6 +309,28 @@ class ETLMonitorFramework:
             AND tgt.WorkFlowID   = src.WorkFlowID
             AND COALESCE(tgt.ProjectCode,'') = COALESCE(src.ProjectCode,'')
             AND COALESCE(tgt.ProcessLoad, '') = COALESCE(src.ProcessLoad, '')
+            WHEN MATCHED AND (
+                COALESCE(tgt.SequenceID,              -1) <> COALESCE(src.SequenceID,              -1) OR
+                COALESCE(tgt.TaskName,                '') <> COALESCE(src.TaskName,                '') OR
+                COALESCE(tgt.TaskDescription,         '') <> COALESCE(src.TaskDescription,         '') OR
+                COALESCE(tgt.SourceType,              '') <> COALESCE(src.SourceType,              '') OR
+                COALESCE(tgt.SourceIdentifier,        '') <> COALESCE(src.SourceIdentifier,        '') OR
+                COALESCE(tgt.SourceSystemCode,        '') <> COALESCE(src.SourceSystemCode,        '') OR
+                COALESCE(tgt.LoadFrequency,           '') <> COALESCE(src.LoadFrequency,           '') OR
+                COALESCE(tgt.TaskMandatory,        FALSE) <> COALESCE(src.TaskMandatory,        FALSE) OR
+                COALESCE(tgt.ExpectedDurationSeconds, -1) <> COALESCE(src.ExpectedDurationSeconds, -1)
+            ) THEN UPDATE SET
+                tgt.SequenceID              = src.SequenceID,
+                tgt.TaskName                = src.TaskName,
+                tgt.TaskDescription         = src.TaskDescription,
+                tgt.SourceType              = src.SourceType,
+                tgt.SourceIdentifier        = src.SourceIdentifier,
+                tgt.SourceSystemCode        = src.SourceSystemCode,
+                tgt.LoadFrequency           = src.LoadFrequency,
+                tgt.TaskMandatory           = src.TaskMandatory,
+                tgt.ExpectedDurationSeconds = src.ExpectedDurationSeconds,
+                tgt.LastUpdatedOn           = current_timestamp(),
+                tgt.LastUpdatedBy           = current_user()
             WHEN NOT MATCHED THEN INSERT (
                 TaskID, ProjectCode, ProcessLoad, WorkFlowID, SequenceID,
                 TaskName, TaskDescription, SourceType, SourceIdentifier,
@@ -290,13 +362,41 @@ class ETLMonitorFramework:
         value_bit: Optional[bool] = None,
     ) -> "ETLMonitorFramework":
         """
-        Register a parameter in ETLconfigParameters via INSERT-ONLY MERGE.
+        Register (or update) a delta watermark or config parameter in ETLconfigParameters.
 
-        parameter_type must be one of:
-            DELTA_DATE  — date/timestamp watermark; auto-advanced on DONE
-            DELTA_ID    — numeric ID watermark; developer must call advance_watermark()
-            FLAG        — boolean config flag; read freely by developers
-            SYSTEM      — reserved for SYSDT; controlled via set_processing_mode()
+        **Mandatory parameters**
+        - ``project_code``    — FK to ETLconfigProcess.ProjectCode
+        - ``process_load``    — FK to ETLconfigProcess.ProcessLoad
+        - ``parameter_name``  — parameter identifier; must match ETLconfigTasks.SourceSystemCode
+                                for DELTA_DATE/DELTA_ID. Use ``"SYSDT"`` for the system date parameter.
+        - ``parameter_type``  — one of:
+
+            ``"DELTA_DATE"``  ValueDateTime watermark — auto-advanced to task StartTime on DONE.
+                              Pass ``value_datetime="2026-01-01"`` to set an initial watermark,
+                              or omit (None) to start in bulk mode (full load).
+
+            ``"DELTA_ID"``    ValueINT watermark — NOT auto-advanced. Developer must call
+                              advance_watermark() after load. Pass ``value_int=0`` for bulk start.
+                              KNOWN LIMITATION: framework cannot detect source max ID automatically.
+
+            ``"FLAG"``        ValueBIT boolean config — read freely by notebooks.
+                              Pass ``value_bit=True`` or ``value_bit=False``.
+
+            ``"SYSTEM"``      Reserved for SYSDT. Controlled via set_processing_mode() only.
+                              Do not set value directly — leave all value params as None.
+
+        **Optional parameters**
+        - ``description``     — human-readable description (default: ``""``)
+        - ``value_datetime``  — initial TIMESTAMP value as string, e.g. ``"2026-01-01"`` (default: ``None``)
+        - ``value_int``       — initial BIGINT value, e.g. ``0`` for bulk start (default: ``None``)
+        - ``value_bit``       — initial BOOLEAN value (default: ``None``)
+
+        MERGE behaviour:
+          - INSERT on first call (new ProjectCode/ProcessLoad/ParameterName).
+          - UPDATE ParameterDescription on subsequent calls if changed.
+          - Value columns (ValueDateTime, ValueINT, ValueBIT) are NOT overwritten on update
+            — use advance_watermark() or set_processing_mode() to change watermark values.
+          - ParameterType, CreatedOn, CreatedBy never overwritten.
 
         Returns self for optional method chaining.
         """
@@ -326,6 +426,12 @@ class ETLMonitorFramework:
             ON  COALESCE(tgt.ProjectCode,  '') = COALESCE(src.ProjectCode,  '')
             AND COALESCE(tgt.ProcessLoad,  '') = COALESCE(src.ProcessLoad,  '')
             AND COALESCE(tgt.ParameterName,'') = COALESCE(src.ParameterName,'')
+            WHEN MATCHED AND (
+                COALESCE(tgt.ParameterDescription,'') <> COALESCE(src.ParameterDescription,'')
+            ) THEN UPDATE SET
+                tgt.ParameterDescription = src.ParameterDescription,
+                tgt.LastUpdatedOn        = current_timestamp(),
+                tgt.LastUpdatedBy        = current_user()
             WHEN NOT MATCHED THEN INSERT (
                 ProjectCode, ProcessLoad, ParameterName, ParameterDescription,
                 ParameterType, ValueDateTime, ValueINT, ValueBIT,
@@ -1008,12 +1114,117 @@ class ETLMonitorFramework:
         """Generate a new UUID execution ID for a logical run."""
         return str(uuid.uuid4())
 
+    def guide(self) -> None:
+        """Print a concise step-by-step usage guide to stdout."""
+        W = 70
+        print("─" * W)
+        print("  Databricks ETL Monitor Framework — Usage Guide")
+        print("─" * W)
+        print("""
+STEP 1 — Setup (idempotent, run every cluster start)
+──────────────────────────────────────────────────────
+  monitor = ETLMonitorFramework(spark, catalog="<catalog>", schema="etl")
+  monitor.setup()
+    Creates: 6 Delta tables + 6 reporting views + seeds sequence stages.
+
+STEP 2 — Register your process (once per domain)
+──────────────────────────────────────────────────
+  monitor.register_process(
+      project_code   = "CORP",          # MANDATORY — project code
+      process_load   = "HR_DAILY",      # MANDATORY — process identifier
+      name           = "HR Daily Load", # optional
+      description    = "...",           # optional
+      owner          = "HR Team",       # optional
+      load_frequency = "D",             # optional  D/W/M/A  (default: D)
+  )
+
+STEP 3 — Register tasks (once per task)
+─────────────────────────────────────────
+  monitor.register_task(
+      project_code             = "CORP",            # MANDATORY
+      process_load             = "HR_DAILY",         # MANDATORY
+      task_id                  = 1,                  # MANDATORY — YOUR integer, you assign it
+      workflow_id              = 1,                  # MANDATORY — 0=Init 1=First pass 2=Second...
+      sequence_id              = 2,                  # MANDATORY — tasks sharing SequenceID run in PARALLEL
+      task_name                = "Load Employees",   # MANDATORY
+      source_type              = "DBX_NOTEBOOK",     # optional  DBX_NOTEBOOK/DBX_JOB/ADF_PIPELINE/DATAFLOW
+      source_identifier        = "/Repos/.../nb",    # optional  notebook path / job id / pipeline name
+      source_system_code       = "LoadEmployees",    # optional  links to watermark ParameterName; None = full load
+      task_description         = "...",              # optional
+      load_frequency           = "D",                # optional  (default: D)
+      task_mandatory           = True,               # optional  FAIL blocks downstream stages (default: True)
+      expected_duration_seconds= 300,                # optional  SLA baseline for v_taskDetail breach flag
+  )
+  # Initiation task is ALWAYS: task_id=0, workflow_id=0, sequence_id=0
+
+STEP 4 — Register watermark parameters (once per watermark)
+─────────────────────────────────────────────────────────────
+  monitor.register_parameter(
+      project_code   = "CORP",            # MANDATORY
+      process_load   = "HR_DAILY",        # MANDATORY
+      parameter_name = "LoadEmployees",   # MANDATORY — must match source_system_code above
+      parameter_type = "DELTA_DATE",      # MANDATORY — DELTA_DATE / DELTA_ID / FLAG / SYSTEM
+      description    = "...",             # optional
+      value_datetime = None,              # optional  None = bulk/full load start
+      value_int      = None,              # optional  for DELTA_ID; 0 = bulk start
+      value_bit      = None,              # optional  for FLAG
+  )
+  # Always register SYSDT:
+  monitor.register_parameter("CORP", "HR_DAILY", "SYSDT", "SYSTEM")
+
+  ParameterType reference:
+    DELTA_DATE  — auto-advanced to task StartTime on DONE
+    DELTA_ID    — NOT auto-advanced; call advance_watermark() after load
+    FLAG        — boolean config; read freely
+    SYSTEM      — SYSDT only; controlled via set_processing_mode()
+
+STEP 5 — Each run: generate steps and instrument tasks
+────────────────────────────────────────────────────────
+  exec_id = ETLMonitorFramework.generate_execution_id()
+  monitor.generate_execution_steps(exec_id, "CORP", "HR_DAILY", "2026-04-10")
+
+  with monitor.task(exec_id, "CORP", "HR_DAILY",
+                    task_id=1, workflow_id=1, sequence_id=2,
+                    processing_date="2026-04-10"):
+      pass  # your notebook logic here
+
+STEP 6 — Query status
+───────────────────────
+  monitor.get_status("CORP", "HR_DAILY", execution_id=exec_id)   # task detail
+  monitor.get_status("CORP", "HR_DAILY", summary_mode=True)       # run rollup
+
+  SQL views:
+    v_processStatus    — cross-process live dashboard
+    v_runSummary       — per execution rollup
+    v_taskDetail       — per-task with SLA breach flag
+    v_mandatoryBlockers— tasks blocking downstream progress
+    v_currentFailures  — all failures today
+    v_watermarks       — watermark values + ActiveValue (ADF bridge)
+
+STEP 7 — Retry after failure
+──────────────────────────────
+  monitor.status_reset("CORP", "HR_DAILY", execution_id=exec_id)        # all failures
+  monitor.status_reset("CORP", "HR_DAILY", execution_id=exec_id,
+                        task_id=1, workflow_id=1)                        # specific task
+
+OTHER METHODS
+─────────────
+  monitor.get_active_watermark("CORP", "HR_DAILY", "LoadEmployees")     # read watermark value
+  monitor.advance_watermark("CORP", "HR_DAILY", "LoadByID", new_int_value=99999)  # DELTA_ID only
+  monitor.set_processing_mode("CORP", "HR_DAILY", is_bulk_mode=True)    # full reload
+  monitor.set_processing_mode("CORP", "HR_DAILY", is_historic_mode=True,
+                               historic_date="2026-01-01")               # historic rerun
+  monitor.set_processing_mode("CORP", "HR_DAILY")                       # restore live mode
+  monitor.sample_usage(spark)                                            # extract sample notebooks
+""".rstrip())
+        print("─" * W)
+
     def sample_usage(self, spark) -> str:
         """
         Extract bundled sample notebooks to the current user's Workspace folder.
 
         Returns the path where the notebooks were extracted.
-        Safe to re-run — overwrites any existing files.
+        Safe to re-run — skips files already up-to-date (compared by mtime).
 
         Usage::
 
@@ -1026,21 +1237,28 @@ class ETLMonitorFramework:
             repo_user = os.environ.get("USER", "unknown")
 
         dest = f"/Workspace/Users/{repo_user}/databricks-etl-monitor/sample_usage"
+        os.makedirs(dest, exist_ok=True)
 
-        try:
-            pkg_path = importlib.resources.files("etl_monitor") / "sample_usage"
-            os.makedirs(dest, exist_ok=True)
-            for item in pkg_path.iterdir():
-                src = str(item)
-                dst = os.path.join(dest, item.name)
-                shutil.copy2(src, dst)
-            logger.info("Sample notebooks extracted to: %s", dest)
-            print(f"Sample notebooks extracted to: {dest}")
-            return dest
-        except Exception as exc:
-            logger.warning("Could not extract sample notebooks: %s", exc)
-            print(f"Warning: Could not extract samples — {exc}")
-            return dest
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
+        bundled = os.path.join(pkg_dir, "sample_usage")
+
+        copied = []
+        if os.path.isdir(bundled):
+            for fname in os.listdir(bundled):
+                if fname.startswith(".") or fname.startswith("~$"):
+                    continue
+                src_file  = os.path.join(bundled, fname)
+                dest_file = os.path.join(dest, fname)
+                if not os.path.isfile(src_file):
+                    continue   # skip __pycache__ and any subdirectories
+                if (not os.path.exists(dest_file)
+                        or os.path.getmtime(src_file) > os.path.getmtime(dest_file)):
+                    shutil.copy2(src_file, dest_file)
+                    copied.append(fname)
+
+        logger.info("Sample notebooks extracted to: %s (%d files)", dest, len(copied))
+        print(f"Sample notebooks extracted to: {dest}")
+        return dest
 
     # ------------------------------------------------------------------
     # Private — setup internals  (mirrors DQFramework pattern)
