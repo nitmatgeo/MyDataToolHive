@@ -1,0 +1,10 @@
+# Build artifacts
+dist/
+build/
+*.egg-info/
+databricks_etl_monitor*/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo

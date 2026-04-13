@@ -43,6 +43,69 @@ RESULTS (written by instrumented notebooks/jobs at runtime)
 DDL_STATEMENTS: dict[str, str] = {
 
     # -----------------------------------------------------------------------
+    # ETLOrganisation — USER-MANAGED  (ported from original SQL Server framework)
+    # PK: OrganisationCode  (enforced via INSERT-ONLY MERGE)
+    # Top-level grouper — enterprise / division / business unit.
+    # In Unity Catalog deployments the catalog is the primary isolation boundary;
+    # ETLOrganisation provides an additional logical grouping layer within a catalog.
+    # -----------------------------------------------------------------------
+    "ETLOrganisation": """
+        CREATE TABLE IF NOT EXISTS {fqn} (
+            OrganisationCode        STRING     NOT NULL
+                COMMENT 'Natural primary key — short code identifying the organisation or division (e.g. CORP, UK, EMEA)',
+            OrganisationName        STRING     NOT NULL
+                COMMENT 'Human-readable organisation name',
+            OrganisationDescription STRING     NOT NULL
+                COMMENT 'Full description of the organisation or business unit',
+            IsActive                BOOLEAN
+                COMMENT 'Soft-delete — FALSE removes organisation from new registrations without affecting history',
+            CreatedOn               TIMESTAMP
+                COMMENT 'Row creation timestamp',
+            CreatedBy               STRING
+                COMMENT 'User who created the row',
+            LastUpdatedOn           TIMESTAMP
+                COMMENT 'Last modification timestamp',
+            LastUpdatedBy           STRING
+                COMMENT 'User who last modified the row'
+        )
+        USING DELTA
+        COMMENT 'Organisation registry — user-managed. Top-level grouper for enterprise deployments. PK: OrganisationCode.'
+    """,
+
+    # -----------------------------------------------------------------------
+    # ETLconfigProject — USER-MANAGED  (ported from original SQL Server framework)
+    # PK: ProjectCode  (enforced via INSERT-ONLY MERGE)
+    # Mid-level grouper — project / portfolio / department within an organisation.
+    # Links to ETLOrganisation via OrganisationCode (natural key, no surrogate ID).
+    # Note: FactoryGUID from the original SQL Server framework is not ported —
+    #       ADF factory binding is not required for the Databricks monitoring layer.
+    # -----------------------------------------------------------------------
+    "ETLconfigProject": """
+        CREATE TABLE IF NOT EXISTS {fqn} (
+            ProjectCode             STRING     NOT NULL
+                COMMENT 'Natural primary key — short code for the project or department (e.g. HR, FINANCE, SUPPLY_CHAIN). FK to ETLconfigProcess.ProjectCode.',
+            OrganisationCode        STRING
+                COMMENT 'FK to ETLOrganisation.OrganisationCode — which org this project belongs to',
+            ProjectName             STRING     NOT NULL
+                COMMENT 'Human-readable project or department name',
+            ProjectDescription      STRING     NOT NULL
+                COMMENT 'Full description of what this project covers',
+            IsActive                BOOLEAN
+                COMMENT 'Soft-delete — FALSE removes project from new registrations without affecting history',
+            CreatedOn               TIMESTAMP
+                COMMENT 'Row creation timestamp',
+            CreatedBy               STRING
+                COMMENT 'User who created the row',
+            LastUpdatedOn           TIMESTAMP
+                COMMENT 'Last modification timestamp',
+            LastUpdatedBy           STRING
+                COMMENT 'User who last modified the row'
+        )
+        USING DELTA
+        COMMENT 'Project registry — user-managed. Mid-level grouper linking an organisation to its ETL processes. PK: ProjectCode. FK: OrganisationCode → ETLOrganisation.'
+    """,
+
+    # -----------------------------------------------------------------------
     # ETLconfigSequence — FRAMEWORK-MANAGED
     # PK: SequenceID  (enforced via INSERT-ONLY MERGE)
     # 7 built-in stages seeded by setup() / seed_sequence_data()
@@ -93,7 +156,7 @@ DDL_STATEMENTS: dict[str, str] = {
             ProcessOwner       STRING
                 COMMENT 'Team or individual responsible for this process',
             LoadFrequency      STRING
-                COMMENT 'D=Daily  W=Weekly  M=Monthly  A=Ad-hoc',
+                COMMENT 'D=Daily  W=Weekly  M=Monthly  Y=Yearly  A=Ad-hoc',
             IsActive           BOOLEAN
                 COMMENT 'Soft-delete',
             CreatedOn          TIMESTAMP
@@ -150,9 +213,9 @@ DDL_STATEMENTS: dict[str, str] = {
             SourceSystemCode        STRING
                 COMMENT 'Links to ETLconfigParameters.ParameterName — which watermark to advance on DONE. NULL for full-load tasks.',
             LoadFrequency           STRING
-                COMMENT 'D=Daily  W=Weekly  M=Monthly',
+                COMMENT 'D=Daily  W=Weekly  M=Monthly  Y=Yearly  A=Ad-hoc',
             TaskMandatory           BOOLEAN
-                COMMENT 'TRUE = processing must not advance past this SequenceID stage if this task FAILs',
+                COMMENT 'TRUE = processing must not advance past this SequenceID stage if this task FAILs. FALSE or NULL = non-mandatory (pipeline continues even if this task FAILs).',
             ExpectedDurationSeconds INT
                 COMMENT 'SLA baseline — v_taskDetail flags rows where DurationSeconds exceeds this',
             IsActive                BOOLEAN
@@ -298,6 +361,8 @@ DDL_STATEMENTS: dict[str, str] = {
 }
 
 TABLE_ORDER = [
+    "ETLOrganisation",      # USER-MANAGED      — top-level org / division registry
+    "ETLconfigProject",     # USER-MANAGED      — mid-level project / department registry
     "ETLconfigSequence",    # FRAMEWORK-MANAGED — 7 built-in stages (auto-seeded)
     "ETLconfigProcess",     # USER-MANAGED      — process / domain registry
     "ETLconfigTasks",       # USER-MANAGED      — task catalogue per process
@@ -307,7 +372,13 @@ TABLE_ORDER = [
 ]
 
 FRAMEWORK_SEEDED_TABLES = {"ETLconfigSequence"}
-USER_CONFIG_TABLES      = {"ETLconfigProcess", "ETLconfigTasks", "ETLconfigParameters"}
+USER_CONFIG_TABLES      = {
+    "ETLOrganisation",
+    "ETLconfigProject",
+    "ETLconfigProcess",
+    "ETLconfigTasks",
+    "ETLconfigParameters",
+}
 RESULTS_TABLES          = {"ETLProcessingSteps", "ETLsysLogs"}
 
 # Framework-reserved SequenceID range for built-in stages

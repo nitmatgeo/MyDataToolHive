@@ -50,8 +50,15 @@ spark.sql(f"""
 
 # COMMAND ----------
 
-# DBTITLE 1,Extract Sample Notebooks to Workspace
-# Extracts bundled sample notebooks to /Workspace/Users/{you}/databricks-etl-monitor/sample_usage/
+# DBTITLE 1,Framework Usage Guide
+# Prints all methods, mandatory vs optional parameters, and step-by-step usage.
+monitor.guide()
+
+# COMMAND ----------
+
+# DBTITLE 1,Extract Sample Notebooks and Config Template to Workspace
+# Extracts bundled sample notebooks and Excel config template to:
+#   /Workspace/Users/{you}/databricks-etl-monitor/sample_usage/
 # Works on all compute types (serverless, classic, no DBFS root required).
 SAMPLE_USAGE_PATH = monitor.sample_usage(spark)
-print(f"Sample notebooks extracted to: {SAMPLE_USAGE_PATH}")
+print(f"Sample resources extracted to: {SAMPLE_USAGE_PATH}")

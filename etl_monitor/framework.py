@@ -104,6 +104,8 @@ class ETLMonitorFramework:
             ETLconfigSequence   — 7 workflow stage definitions
 
         USER-MANAGED (empty, populate via register_* helpers or Spark SQL):
+            ETLOrganisation     — top-level org / division registry
+            ETLconfigProject    — mid-level project / department registry
             ETLconfigProcess    — process registry
             ETLconfigTasks      — task catalogue per process
             ETLconfigParameters — delta watermarks and config flags
@@ -125,8 +127,9 @@ class ETLMonitorFramework:
             self.seed_sequence_data()
             logger.info(
                 "ETL Monitor setup complete. ETLconfigSequence seeded (%d stages). "
-                "Populate ETLconfigProcess and ETLconfigTasks via register_process() "
-                "/ register_task(), then ETLconfigParameters via register_parameter().",
+                "Populate ETLOrganisation via register_organisation(), ETLconfigProject "
+                "via register_project(), ETLconfigProcess via register_process(), "
+                "ETLconfigTasks via register_task(), ETLconfigParameters via register_parameter().",
                 len(SEQUENCE_SEED),
             )
 
@@ -162,8 +165,118 @@ class ETLMonitorFramework:
         logger.info("ETLconfigSequence seeded: %d stages.", len(SEQUENCE_SEED))
 
     # ------------------------------------------------------------------
-    # Public — process / task / parameter registration
+    # Public — organisation / project / process / task / parameter registration
     # ------------------------------------------------------------------
+
+    def register_organisation(
+        self,
+        organisation_code: str,
+        organisation_name: str,
+        organisation_description: str = "",
+    ) -> "ETLMonitorFramework":
+        """
+        Register (or update) an organisation in ETLOrganisation.
+
+        **Mandatory parameters**
+        - ``organisation_code``        — natural PK, short code e.g. ``"CORP"``, ``"UK"``, ``"EMEA"``
+        - ``organisation_name``        — human-readable name e.g. ``"Corporate Division"``
+
+        **Optional parameters**
+        - ``organisation_description`` — full description (default: ``""``)
+
+        MERGE behaviour:
+          - INSERT on first call (new OrganisationCode).
+          - UPDATE OrganisationName and OrganisationDescription on subsequent calls if changed.
+          - CreatedOn / CreatedBy are never overwritten.
+
+        Returns self for optional method chaining.
+        """
+        fqn = self._fqn("ETLOrganisation")
+        self.spark.sql(f"""
+            MERGE INTO {fqn} AS tgt
+            USING (SELECT
+                '{organisation_code}'        AS OrganisationCode,
+                '{organisation_name}'        AS OrganisationName,
+                '{organisation_description}' AS OrganisationDescription
+            ) AS src
+            ON COALESCE(tgt.OrganisationCode,'') = COALESCE(src.OrganisationCode,'')
+            WHEN MATCHED AND (
+                COALESCE(tgt.OrganisationName,        '') <> COALESCE(src.OrganisationName,        '') OR
+                COALESCE(tgt.OrganisationDescription, '') <> COALESCE(src.OrganisationDescription, '')
+            ) THEN UPDATE SET
+                tgt.OrganisationName        = src.OrganisationName,
+                tgt.OrganisationDescription = src.OrganisationDescription,
+                tgt.LastUpdatedOn           = current_timestamp(),
+                tgt.LastUpdatedBy           = current_user()
+            WHEN NOT MATCHED THEN INSERT (
+                OrganisationCode, OrganisationName, OrganisationDescription,
+                IsActive, CreatedOn, CreatedBy, LastUpdatedOn, LastUpdatedBy
+            ) VALUES (
+                src.OrganisationCode, src.OrganisationName, src.OrganisationDescription,
+                TRUE, current_timestamp(), current_user(),
+                current_timestamp(), current_user()
+            )
+        """)
+        logger.info("Organisation registered: %s", organisation_code)
+        return self
+
+    def register_project(
+        self,
+        project_code: str,
+        project_name: str,
+        project_description: str = "",
+        organisation_code: str = "",
+    ) -> "ETLMonitorFramework":
+        """
+        Register (or update) a project in ETLconfigProject.
+
+        **Mandatory parameters**
+        - ``project_code``        — natural PK, short code e.g. ``"HR"``, ``"FINANCE"``
+        - ``project_name``        — human-readable name e.g. ``"HR Data Platform"``
+
+        **Optional parameters**
+        - ``project_description`` — full description (default: ``""``)
+        - ``organisation_code``   — FK to ETLOrganisation.OrganisationCode (default: ``""``)
+
+        MERGE behaviour:
+          - INSERT on first call (new ProjectCode).
+          - UPDATE ProjectName, ProjectDescription, OrganisationCode on subsequent calls if changed.
+          - CreatedOn / CreatedBy are never overwritten.
+
+        Returns self for optional method chaining.
+        """
+        fqn     = self._fqn("ETLconfigProject")
+        org_sql = f"'{organisation_code}'" if organisation_code else "NULL"
+        self.spark.sql(f"""
+            MERGE INTO {fqn} AS tgt
+            USING (SELECT
+                '{project_code}'        AS ProjectCode,
+                {org_sql}               AS OrganisationCode,
+                '{project_name}'        AS ProjectName,
+                '{project_description}' AS ProjectDescription
+            ) AS src
+            ON COALESCE(tgt.ProjectCode,'') = COALESCE(src.ProjectCode,'')
+            WHEN MATCHED AND (
+                COALESCE(tgt.OrganisationCode,   '') <> COALESCE(src.OrganisationCode,   '') OR
+                COALESCE(tgt.ProjectName,        '') <> COALESCE(src.ProjectName,        '') OR
+                COALESCE(tgt.ProjectDescription, '') <> COALESCE(src.ProjectDescription, '')
+            ) THEN UPDATE SET
+                tgt.OrganisationCode   = src.OrganisationCode,
+                tgt.ProjectName        = src.ProjectName,
+                tgt.ProjectDescription = src.ProjectDescription,
+                tgt.LastUpdatedOn      = current_timestamp(),
+                tgt.LastUpdatedBy      = current_user()
+            WHEN NOT MATCHED THEN INSERT (
+                ProjectCode, OrganisationCode, ProjectName, ProjectDescription,
+                IsActive, CreatedOn, CreatedBy, LastUpdatedOn, LastUpdatedBy
+            ) VALUES (
+                src.ProjectCode, src.OrganisationCode, src.ProjectName,
+                src.ProjectDescription, TRUE, current_timestamp(), current_user(),
+                current_timestamp(), current_user()
+            )
+        """)
+        logger.info("Project registered: %s (org: %s)", project_code, organisation_code or "—")
+        return self
 
     def register_process(
         self,
@@ -1125,23 +1238,37 @@ STEP 1 — Setup (idempotent, run every cluster start)
 ──────────────────────────────────────────────────────
   monitor = ETLMonitorFramework(spark, catalog="<catalog>", schema="etl")
   monitor.setup()
-    Creates: 6 Delta tables + 6 reporting views + seeds sequence stages.
+    Creates: 8 Delta tables + 6 reporting views + seeds sequence stages.
 
-STEP 2 — Register your process (once per domain)
+STEP 2 — Register organisation and project (once per org/project)
+──────────────────────────────────────────────────────────────────
+  monitor.register_organisation(
+      organisation_code        = "CORP",             # MANDATORY — short code
+      organisation_name        = "Corporate Group",  # MANDATORY — display name
+      organisation_description = "...",              # optional
+  )
+  monitor.register_project(
+      project_code        = "HR",                    # MANDATORY — short code, FK to ETLconfigProcess
+      project_name        = "HR Data Platform",      # MANDATORY — display name
+      project_description = "...",                   # optional
+      organisation_code   = "CORP",                  # optional — FK to ETLOrganisation
+  )
+
+STEP 3 — Register your process (once per domain)
 ──────────────────────────────────────────────────
   monitor.register_process(
-      project_code   = "CORP",          # MANDATORY — project code
+      project_code   = "HR",            # MANDATORY — must match ETLconfigProject.ProjectCode
       process_load   = "HR_DAILY",      # MANDATORY — process identifier
       name           = "HR Daily Load", # optional
       description    = "...",           # optional
       owner          = "HR Team",       # optional
-      load_frequency = "D",             # optional  D/W/M/A  (default: D)
+      load_frequency = "D",             # optional  D/W/M/Y/A  (default: D)
   )
 
-STEP 3 — Register tasks (once per task)
+STEP 5 — Register tasks (once per task)
 ─────────────────────────────────────────
   monitor.register_task(
-      project_code             = "CORP",            # MANDATORY
+      project_code             = "HR",              # MANDATORY — must match ETLconfigProject.ProjectCode
       process_load             = "HR_DAILY",         # MANDATORY
       task_id                  = 1,                  # MANDATORY — YOUR integer, you assign it
       workflow_id              = 1,                  # MANDATORY — 0=Init 1=First pass 2=Second...
@@ -1151,16 +1278,16 @@ STEP 3 — Register tasks (once per task)
       source_identifier        = "/Repos/.../nb",    # optional  notebook path / job id / pipeline name
       source_system_code       = "LoadEmployees",    # optional  links to watermark ParameterName; None = full load
       task_description         = "...",              # optional
-      load_frequency           = "D",                # optional  (default: D)
+      load_frequency           = "D",                # optional  D/W/M/Y/A  (default: D)
       task_mandatory           = True,               # optional  FAIL blocks downstream stages (default: True)
       expected_duration_seconds= 300,                # optional  SLA baseline for v_taskDetail breach flag
   )
   # Initiation task is ALWAYS: task_id=0, workflow_id=0, sequence_id=0
 
-STEP 4 — Register watermark parameters (once per watermark)
+STEP 6 — Register watermark parameters (once per watermark)
 ─────────────────────────────────────────────────────────────
   monitor.register_parameter(
-      project_code   = "CORP",            # MANDATORY
+      project_code   = "HR",              # MANDATORY
       process_load   = "HR_DAILY",        # MANDATORY
       parameter_name = "LoadEmployees",   # MANDATORY — must match source_system_code above
       parameter_type = "DELTA_DATE",      # MANDATORY — DELTA_DATE / DELTA_ID / FLAG / SYSTEM
@@ -1170,7 +1297,7 @@ STEP 4 — Register watermark parameters (once per watermark)
       value_bit      = None,              # optional  for FLAG
   )
   # Always register SYSDT:
-  monitor.register_parameter("CORP", "HR_DAILY", "SYSDT", "SYSTEM")
+  monitor.register_parameter("HR", "HR_DAILY", "SYSDT", "SYSTEM")
 
   ParameterType reference:
     DELTA_DATE  — auto-advanced to task StartTime on DONE
@@ -1178,20 +1305,20 @@ STEP 4 — Register watermark parameters (once per watermark)
     FLAG        — boolean config; read freely
     SYSTEM      — SYSDT only; controlled via set_processing_mode()
 
-STEP 5 — Each run: generate steps and instrument tasks
+STEP 7 — Each run: generate steps and instrument tasks
 ────────────────────────────────────────────────────────
   exec_id = ETLMonitorFramework.generate_execution_id()
-  monitor.generate_execution_steps(exec_id, "CORP", "HR_DAILY", "2026-04-10")
+  monitor.generate_execution_steps(exec_id, "HR", "HR_DAILY", "2026-04-10")
 
-  with monitor.task(exec_id, "CORP", "HR_DAILY",
+  with monitor.task(exec_id, "HR", "HR_DAILY",
                     task_id=1, workflow_id=1, sequence_id=2,
                     processing_date="2026-04-10"):
       pass  # your notebook logic here
 
-STEP 6 — Query status
+STEP 8 — Query status
 ───────────────────────
-  monitor.get_status("CORP", "HR_DAILY", execution_id=exec_id)   # task detail
-  monitor.get_status("CORP", "HR_DAILY", summary_mode=True)       # run rollup
+  monitor.get_status("HR", "HR_DAILY", execution_id=exec_id)   # task detail
+  monitor.get_status("HR", "HR_DAILY", summary_mode=True)       # run rollup
 
   SQL views:
     v_processStatus    — cross-process live dashboard
@@ -1201,11 +1328,11 @@ STEP 6 — Query status
     v_currentFailures  — all failures today
     v_watermarks       — watermark values + ActiveValue (ADF bridge)
 
-STEP 7 — Retry after failure
+STEP 9 — Retry after failure
 ──────────────────────────────
-  monitor.status_reset("CORP", "HR_DAILY", execution_id=exec_id)        # all failures
-  monitor.status_reset("CORP", "HR_DAILY", execution_id=exec_id,
-                        task_id=1, workflow_id=1)                        # specific task
+  monitor.status_reset("HR", "HR_DAILY", execution_id=exec_id)        # all failures
+  monitor.status_reset("HR", "HR_DAILY", execution_id=exec_id,
+                        task_id=1, workflow_id=1)                      # specific task
 
 OTHER METHODS
 ─────────────
