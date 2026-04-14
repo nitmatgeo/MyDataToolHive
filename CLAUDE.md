@@ -82,6 +82,8 @@ v_mandatoryBlockers    v_currentFailures   v_watermarks
 TaskID          WorkFlowID (capital F)    Attempts (plural, not Attempt)
 TaskMandatory   SequenceID                SourceSystemCode
 ProcessingDate  ExecutionID               LogMessage
+FileNameMask    FileExtension             InFilePath     OutFilePath
+FullFileName    WatermarkType             WatermarkValue
 ```
 
 ### Audit columns — ALL user-managed config tables have all four
@@ -289,12 +291,59 @@ histories do not interact.
 
 | Original stored procedure | Python method | Notes |
 |--------------------------|--------------|-------|
-| `p_ETLProcessingSteps` (GenerateMode=1) | `generate_execution_steps()` | First call: all tasks NQUE at Attempts=0. New ExecutionID same date: Attempts+1, skip DONE tasks. Same ExecutionID: no-op. |
+| `p_ETLProcessingSteps` (GenerateMode=1) | `generate_execution_steps()` | First call: all tasks NQUE at Attempts=0. New ExecutionID same date: Attempts+1, skip DONE tasks. Same ExecutionID: no-op. **Period-aware NOT EXISTS:** D=same date, M=same YYYYMM (cross-date skip), Y=same YYYY. **FullFileName computed** by LoadFrequency at generate time. |
+| `p_ETLProcessingSteps` (GenerateMode=0, per-task output) | `get_pending_tasks()` | Returns all non-DONE tasks with `FullFileName`, `InFilePath`, `OutFilePath`, `WatermarkValue`, `WatermarkType`. `WatermarkValue` replaces `#DELTAPARAMETER#` substitution — ADF uses `@concat()` with this value. |
 | `p_ETLOrchestrationSteps` | `get_pending_tasks()` | Returns non-DONE tasks; auto-generates on first call |
 | `p_ETLProcessingStatusUpdate` | `end_task()` / `fail_task()` | Status + timing write-back; DELTA_DATE auto-advance on DONE; LOAD_GO → NQUE on any FAIL |
 | `p_ETLProcessingStatusGet` | `get_status()` | Summary or task-level detail; `summary_mode=True` for rollup |
 | `p_ETLProcessingStatusReset` | `status_reset()` | DONE → RQUE for day replay; NOT for failure retry (use new ExecutionID for that) |
 | `p_ETLconfigProcessingMode` | `set_processing_mode()` | Historic mode, live mode, bulk mode, specific param |
+
+---
+
+## File-based source tasks — naming and period-aware skip
+
+### ETLconfigTasks file columns
+```
+FileNameMask   STRING   — base filename without date suffix (e.g. payroll_uk)
+FileExtension  STRING   — e.g. '.csv', '.xlsx' (include the dot)
+InFilePath     STRING   — ADLS/storage base folder (e.g. abfss://raw@store.dfs.core.windows.net/payroll/uk/)
+OutFilePath    STRING   — output/processed folder (NULL if not needed)
+```
+NULL `FileNameMask` = non-file task; all four columns stay NULL.
+
+### ETLProcessingSteps snapshot columns (computed at generate time)
+```
+FullFileName   STRING   — FileNameMask + date suffix + FileExtension
+InFilePath     STRING   — snapshot of ETLconfigTasks.InFilePath
+OutFilePath    STRING   — snapshot of ETLconfigTasks.OutFilePath
+```
+
+### FullFileName date suffix by LoadFrequency (mirrors original SQL Server framework)
+| LoadFrequency | Format | Example (2026-04-09) |
+|---|---|---|
+| `D` | `_yyyyMMdd` | `payroll_uk_20260409.csv` |
+| `M` | `_yyyyMM`   | `payroll_uk_202604.csv` |
+| `Y` | `_yyyy`     | `payroll_uk_2026.csv` |
+
+### Period-aware NOT EXISTS in generate_execution_steps()
+The original SQL Server SP only checked `ProcessingDate = @ProcessingDate` — causing monthly
+files to be re-inserted every day of the month. The DBX framework improves on this:
+
+| LoadFrequency | Skip condition |
+|---|---|
+| `D` | DONE on same ProcessingDate, Attempts < current |
+| `M` | DONE on **any** date in same calendar `YYYYMM` (cross-date guard) |
+| `Y` | DONE on **any** date in same calendar `YYYY` (cross-date guard) |
+| other | Same as `D` |
+
+**Implication:** a monthly file loaded on April 5 will NOT be re-inserted on April 6, 7, etc.
+**Force reload:** `status_reset()` DONE → RQUE removes the DONE guard → next generate inserts NQUE.
+
+### get_pending_tasks() output — ADF integration columns
+`WatermarkValue` (STRING) replaces the original `#DELTAPARAMETER#` inline substitution.
+ADF reads this from the `get_pending_tasks` result and builds its own `@concat()` query.
+`FullFileName` + `InFilePath` tell ADF where to find the input file.
 
 ---
 
@@ -354,6 +403,11 @@ to `end_task()` on DONE; on FAIL the exception string is captured automatically.
 `TaskName`, `SequenceCode`, `TaskMandatory`, `SourceSystemCode` copied from config tables
 at `generate_execution_steps()` time.  History stays accurate even if the task catalogue
 is later changed or tasks are deactivated.
+
+`FullFileName`, `InFilePath`, `OutFilePath` also snapshotted at generate time:
+- `FullFileName` is **computed** (not just copied) — `FileNameMask` + date suffix by `LoadFrequency`
+  + `FileExtension`.  Mirrors the original SQL Server framework's `FullFileName` column.
+- Callers (ADF / notebooks) combine `InFilePath + '/' + FullFileName` for the full file URL.
 
 ---
 
@@ -419,6 +473,15 @@ After each SequenceID stage completes, ADF checks `v_mandatoryBlockers` before a
 13. **Snapshot columns** — `TaskName`, `SequenceCode`, `TaskMandatory`, `SourceSystemCode`
     are copied into `ETLProcessingSteps` at `generate_execution_steps()` time.
     History remains accurate even if the catalogue changes later.
+14. **File columns** — `FullFileName`, `InFilePath`, `OutFilePath` also snapshotted at generate time.
+    `FullFileName` is **computed** — `FileNameMask` + date suffix by `LoadFrequency` + `FileExtension`.
+    NULL `FileNameMask` = non-file task. Never manually insert FullFileName — always let generate compute it.
+15. **Period-aware NOT EXISTS** — `generate_execution_steps()` uses cross-date DONE guard for M and Y frequency
+    tasks. A monthly file DONE on day 5 blocks re-insertion on day 6+. `status_reset()` is the only
+    authorised path to force a same-period reload.
+16. **`get_pending_tasks()` returns `WatermarkValue`** — joined from `ETLconfigParameters` on
+    `SourceSystemCode = ParameterName`. This is the DBX equivalent of `#DELTAPARAMETER#` value.
+    ADF uses it in `@concat()` expressions. Do not substitute inline — return as a plain column.
 
 ---
 

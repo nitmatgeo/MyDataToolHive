@@ -324,13 +324,19 @@ print("✓ HR / EMPLOYEE_MASTER tasks registered")
 # MAGIC %md
 # MAGIC ### HR / PAYROLL_MONTHLY Tasks
 # MAGIC
-# MAGIC | TaskID | WF | SeqID | Task | Mandatory |
-# MAGIC |---|---|---|---|---|
-# MAGIC | 0 | 0 | 0 | Initiation | Y |
-# MAGIC | 1 | 1 | 2 | Load Payroll File UK | Y |
-# MAGIC | 2 | 1 | 2 | Load Payroll File US | N |
-# MAGIC | 3 | 2 | 5 | Apply Payroll Derivations | Y |
-# MAGIC | 4 | 2 | 6 | Build Payroll Analytics Mart | Y |
+# MAGIC | TaskID | WF | SeqID | Task | Mandatory | FileNameMask | Frequency |
+# MAGIC |---|---|---|---|---|---|---|
+# MAGIC | 0 | 0 | 0 | Initiation | Y | — | M |
+# MAGIC | 1 | 1 | 2 | Load Payroll File UK | Y | payroll_uk | M |
+# MAGIC | 2 | 1 | 2 | Load Payroll File US | N | payroll_us | M |
+# MAGIC | 3 | 2 | 5 | Apply Payroll Derivations | Y | — | M |
+# MAGIC | 4 | 2 | 6 | Build Payroll Analytics Mart | Y | — | M |
+# MAGIC
+# MAGIC Tasks 1 and 2 are **file-based** — `generate_execution_steps()` computes `FullFileName`
+# MAGIC as `payroll_uk_YYYYMM.csv` / `payroll_us_YYYYMM.csv` per the M (Monthly) frequency rule.
+# MAGIC The **monthly cross-date skip** applies: if the file was loaded successfully on any day
+# MAGIC in the same calendar month, subsequent daily pipeline runs skip this task automatically.
+# MAGIC Use `status_reset()` (DONE → RQUE) to force a same-month reload.
 
 # COMMAND ----------
 
@@ -356,12 +362,17 @@ print("✓ HR / EMPLOYEE_MASTER tasks registered")
         workflow_id               = 1,
         sequence_id               = 2,           # parallel with task 2
         task_name                 = "Load Payroll File UK",
-        task_description          = "Monthly payroll export from bureau via SFTP network share — UK entities.",
+        task_description          = "Monthly payroll export from bureau via ADLS drop path — UK entities. "
+                                    "FullFileName computed as payroll_uk_YYYYMM.csv per M frequency. "
+                                    "Monthly cross-date skip: once loaded for the month, not re-inserted on subsequent days.",
         source_type               = "DBX_NOTEBOOK",
-        source_identifier         = "\\\\payroll-bureau\\exports\\uk\\monthly",
+        source_identifier         = "/Workspace/Repos/hr-platform/payroll/01-load-payroll-uk",
         source_system_code        = "LoadPayrollUK",
         task_mandatory            = True,
         load_frequency            = "M",
+        file_name_mask            = "payroll_uk",   # → payroll_uk_202604.csv (April M run)
+        file_extension            = ".csv",
+        in_file_path              = "abfss://raw@hrdatalake.dfs.core.windows.net/payroll/uk/monthly/",
     )
     .register_task(
         project_code              = "HR",
@@ -371,12 +382,16 @@ print("✓ HR / EMPLOYEE_MASTER tasks registered")
         sequence_id               = 2,           # parallel with task 1, non-mandatory
         task_name                 = "Load Payroll File US",
         task_description          = "Monthly payroll export from bureau ADLS drop path — US entities. "
-                                    "Non-mandatory — US payroll may be delayed without blocking UK close.",
+                                    "Non-mandatory — US payroll may be delayed without blocking UK close. "
+                                    "FullFileName computed as payroll_us_YYYYMM.csv per M frequency.",
         source_type               = "DBX_NOTEBOOK",
-        source_identifier         = "abfss://raw@hrdatalake.dfs.core.windows.net/payroll/us/monthly/",
+        source_identifier         = "/Workspace/Repos/hr-platform/payroll/02-load-payroll-us",
         source_system_code        = "LoadPayrollUS",
         task_mandatory            = False,
         load_frequency            = "M",
+        file_name_mask            = "payroll_us",   # → payroll_us_202604.csv (April M run)
+        file_extension            = ".csv",
+        in_file_path              = "abfss://raw@hrdatalake.dfs.core.windows.net/payroll/us/monthly/",
     )
     .register_task(
         project_code              = "HR",
@@ -561,7 +576,8 @@ print("✓ FINANCE / REGULATORY_ANNUAL tasks registered")
 spark.sql(f"""
     SELECT t.ProjectCode, t.ProcessLoad, t.WorkFlowID, t.SequenceID,
            s.SequenceCode, t.TaskID, t.TaskName, t.SourceType,
-           t.SourceSystemCode, t.TaskMandatory, t.LoadFrequency
+           t.SourceSystemCode, t.TaskMandatory, t.LoadFrequency,
+           t.FileNameMask, t.FileExtension, t.InFilePath
     FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`ETLconfigTasks` t
     JOIN `{MY_CATALOG}`.`{ETL_SCHEMA}`.`ETLconfigSequence` s
       ON t.SequenceID = s.SequenceID

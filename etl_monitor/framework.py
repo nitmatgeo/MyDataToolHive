@@ -361,6 +361,10 @@ class ETLMonitorFramework:
         task_description: str = "",
         load_frequency: str = "D",
         task_mandatory: bool = True,
+        file_name_mask: str = "",
+        file_extension: str = "",
+        in_file_path: str = "",
+        out_file_path: str = "",
     ) -> "ETLMonitorFramework":
         """
         Register (or update) a task in ETLconfigTasks.
@@ -387,6 +391,14 @@ class ETLMonitorFramework:
         - ``task_description``          — longer description (default: ``""``)
         - ``load_frequency``            — ``"D"`` | ``"W"`` | ``"M"`` | ``"Y"`` | ``"A"`` (default: ``"D"``)
         - ``task_mandatory``            — if True, a FAIL blocks downstream SequenceID stages (default: ``True``)
+        - ``file_name_mask``            — base filename without date suffix for file-based source tasks
+                                          (e.g. ``"payroll_uk"``). Leave empty for non-file tasks. (default: ``""``)
+                                          ``generate_execution_steps()`` appends the date suffix by LoadFrequency:
+                                          D→``_yyyyMMdd``, M→``_yyyyMM``, Y→``_yyyy`` — then ``file_extension``.
+        - ``file_extension``            — file extension including dot (e.g. ``".csv"``, ``".xlsx"``). (default: ``""``)
+        - ``in_file_path``              — ADLS/storage base folder path for input files
+                                          (e.g. ``"abfss://raw@store.dfs.core.windows.net/payroll/uk/"``). (default: ``""``)
+        - ``out_file_path``             — ADLS/storage output path. Leave empty if not applicable. (default: ``""``)
 
         MERGE behaviour:
           - INSERT on first call (new composite key).
@@ -397,6 +409,10 @@ class ETLMonitorFramework:
         """
         fqn     = self._fqn("ETLconfigTasks")
         ssc_sql = f"'{source_system_code}'" if source_system_code else "NULL"
+        fnm_sql = f"'{file_name_mask}'"     if file_name_mask     else "NULL"
+        fex_sql = f"'{file_extension}'"     if file_extension     else "NULL"
+        ifp_sql = f"'{in_file_path}'"       if in_file_path       else "NULL"
+        ofp_sql = f"'{out_file_path}'"      if out_file_path      else "NULL"
 
         self.spark.sql(f"""
             MERGE INTO {fqn} AS tgt
@@ -411,6 +427,10 @@ class ETLMonitorFramework:
                 '{source_type}'        AS SourceType,
                 '{source_identifier}'  AS SourceIdentifier,
                 {ssc_sql}              AS SourceSystemCode,
+                {fnm_sql}              AS FileNameMask,
+                {fex_sql}              AS FileExtension,
+                {ifp_sql}              AS InFilePath,
+                {ofp_sql}              AS OutFilePath,
                 '{load_frequency}'     AS LoadFrequency,
                 {str(task_mandatory).upper()}  AS TaskMandatory
             ) AS src
@@ -425,6 +445,10 @@ class ETLMonitorFramework:
                 COALESCE(tgt.SourceType,              '') <> COALESCE(src.SourceType,              '') OR
                 COALESCE(tgt.SourceIdentifier,        '') <> COALESCE(src.SourceIdentifier,        '') OR
                 COALESCE(tgt.SourceSystemCode,        '') <> COALESCE(src.SourceSystemCode,        '') OR
+                COALESCE(tgt.FileNameMask,            '') <> COALESCE(src.FileNameMask,            '') OR
+                COALESCE(tgt.FileExtension,           '') <> COALESCE(src.FileExtension,           '') OR
+                COALESCE(tgt.InFilePath,              '') <> COALESCE(src.InFilePath,              '') OR
+                COALESCE(tgt.OutFilePath,             '') <> COALESCE(src.OutFilePath,             '') OR
                 COALESCE(tgt.LoadFrequency,           '') <> COALESCE(src.LoadFrequency,           '') OR
                 COALESCE(tgt.TaskMandatory,        FALSE) <> COALESCE(src.TaskMandatory,        FALSE)
             ) THEN UPDATE SET
@@ -434,6 +458,10 @@ class ETLMonitorFramework:
                 tgt.SourceType              = src.SourceType,
                 tgt.SourceIdentifier        = src.SourceIdentifier,
                 tgt.SourceSystemCode        = src.SourceSystemCode,
+                tgt.FileNameMask            = src.FileNameMask,
+                tgt.FileExtension           = src.FileExtension,
+                tgt.InFilePath              = src.InFilePath,
+                tgt.OutFilePath             = src.OutFilePath,
                 tgt.LoadFrequency           = src.LoadFrequency,
                 tgt.TaskMandatory           = src.TaskMandatory,
                 tgt.LastUpdatedOn           = current_timestamp(),
@@ -441,12 +469,14 @@ class ETLMonitorFramework:
             WHEN NOT MATCHED THEN INSERT (
                 TaskID, ProjectCode, ProcessLoad, WorkFlowID, SequenceID,
                 TaskName, TaskDescription, SourceType, SourceIdentifier,
-                SourceSystemCode, LoadFrequency, TaskMandatory, IsActive,
+                SourceSystemCode, FileNameMask, FileExtension, InFilePath, OutFilePath,
+                LoadFrequency, TaskMandatory, IsActive,
                 CreatedOn, CreatedBy, LastUpdatedOn, LastUpdatedBy
             ) VALUES (
                 src.TaskID, src.ProjectCode, src.ProcessLoad, src.WorkFlowID,
                 src.SequenceID, src.TaskName, src.TaskDescription,
                 src.SourceType, src.SourceIdentifier, src.SourceSystemCode,
+                src.FileNameMask, src.FileExtension, src.InFilePath, src.OutFilePath,
                 src.LoadFrequency, src.TaskMandatory, TRUE,
                 current_timestamp(), current_user(),
                 current_timestamp(), current_user()
@@ -614,19 +644,49 @@ class ETLMonitorFramework:
         """).collect()[0]
         iteration = int(row["NextAttempts"])
 
-        # Insert rows for tasks that have NOT already succeeded (DONE at a previous Attempts).
-        # For Attempts=0: Attempts < 0 is always false → all tasks inserted.
-        # For Attempts=N (retry): tasks with DONE at Attempts < N are skipped.
+        # Insert NQUE rows for tasks that have NOT already succeeded in this period.
+        #
+        # Period-aware NOT EXISTS (mirrors FullFileName date-suffix logic):
+        #   D  (Daily)   — same ProcessingDate + Attempts < current (standard retry guard)
+        #   M  (Monthly) — any DONE in the same calendar YYYYMM (cross-date skip)
+        #   Y  (Yearly)  — any DONE in the same calendar YYYY   (cross-date skip)
+        #   other        — same ProcessingDate + Attempts < current (default)
+        #
+        # Monthly/Yearly cross-date skip: if payroll_uk_202604.csv was successfully loaded
+        # on April 5, the April 6 daily pipeline will NOT re-insert that task — it was
+        # already DONE for this month.  Use status_reset() to force a same-period reload.
+        #
+        # FullFileName computed by LoadFrequency (mirrors original SQL Server framework):
+        #   D → FileNameMask_yyyyMMdd + FileExtension  (e.g. payroll_uk_20260409.csv)
+        #   M → FileNameMask_yyyyMM   + FileExtension  (e.g. payroll_uk_202604.csv)
+        #   Y → FileNameMask_yyyy     + FileExtension  (e.g. payroll_uk_2026.csv)
+        #   NULL FileNameMask → FullFileName stays NULL (non-file tasks)
         self.spark.sql(f"""
             INSERT INTO {steps}
             (ProcessingDate, ProjectCode, ProcessLoad, ExecutionID,
              WorkFlowID, TaskID, SequenceID, Attempts, Status,
              TaskName, SequenceCode, TaskMandatory, SourceSystemCode,
+             FullFileName, InFilePath, OutFilePath,
              StartTime, LastUpdatedOn, LastUpdatedBy)
             SELECT
-                '{processing_date}', t.ProjectCode, t.ProcessLoad, '{execution_id}',
+                date('{processing_date}'), t.ProjectCode, t.ProcessLoad, '{execution_id}',
                 t.WorkFlowID, t.TaskID, t.SequenceID, {iteration}, 'NQUE',
                 t.TaskName, s.SequenceCode, t.TaskMandatory, t.SourceSystemCode,
+                CASE
+                    WHEN t.FileNameMask IS NULL OR t.FileNameMask = '' THEN NULL
+                    WHEN t.LoadFrequency = 'D' THEN
+                        t.FileNameMask || '_' || date_format(date('{processing_date}'), 'yyyyMMdd')
+                        || COALESCE(t.FileExtension, '')
+                    WHEN t.LoadFrequency = 'M' THEN
+                        t.FileNameMask || '_' || date_format(date('{processing_date}'), 'yyyyMM')
+                        || COALESCE(t.FileExtension, '')
+                    WHEN t.LoadFrequency = 'Y' THEN
+                        t.FileNameMask || '_' || date_format(date('{processing_date}'), 'yyyy')
+                        || COALESCE(t.FileExtension, '')
+                    ELSE NULL
+                END                          AS FullFileName,
+                NULLIF(t.InFilePath,  '')    AS InFilePath,
+                NULLIF(t.OutFilePath, '')    AS OutFilePath,
                 current_timestamp(), current_timestamp(), current_user()
             FROM {tasks} t
             LEFT JOIN {seqs} s ON t.SequenceID = s.SequenceID
@@ -635,14 +695,32 @@ class ETLMonitorFramework:
               AND t.IsActive    = TRUE
               AND NOT EXISTS (
                 SELECT 1 FROM {steps} e
-                WHERE e.Status        = 'DONE'
-                  AND e.Attempts      < {iteration}
-                  AND e.ProcessingDate = '{processing_date}'
-                  AND e.ProjectCode   = '{project_code}'
-                  AND e.ProcessLoad   = '{process_load}'
-                  AND e.WorkFlowID    = t.WorkFlowID
-                  AND e.TaskID        = t.TaskID
-                  AND e.SequenceID    = t.SequenceID
+                WHERE e.Status      = 'DONE'
+                  AND e.ProjectCode = '{project_code}'
+                  AND e.ProcessLoad = '{process_load}'
+                  AND e.WorkFlowID  = t.WorkFlowID
+                  AND e.TaskID      = t.TaskID
+                  AND e.SequenceID  = t.SequenceID
+                  AND (
+                    -- Daily: same date only, prior attempts
+                    (t.LoadFrequency = 'D'
+                        AND e.ProcessingDate = date('{processing_date}')
+                        AND e.Attempts < {iteration})
+                    OR
+                    -- Monthly: any DONE in the same calendar month (cross-date guard)
+                    (t.LoadFrequency = 'M'
+                        AND date_format(e.ProcessingDate, 'yyyy-MM')
+                            = date_format(date('{processing_date}'), 'yyyy-MM'))
+                    OR
+                    -- Yearly: any DONE in the same calendar year (cross-date guard)
+                    (t.LoadFrequency = 'Y'
+                        AND year(e.ProcessingDate) = year(date('{processing_date}')))
+                    OR
+                    -- All other frequencies: same date, prior attempts
+                    (t.LoadFrequency NOT IN ('D', 'M', 'Y')
+                        AND e.ProcessingDate = date('{processing_date}')
+                        AND e.Attempts < {iteration})
+                  )
               )
         """)
         logger.info("Execution steps generated for %s/%s exec=%s date=%s attempts=%d",
@@ -691,23 +769,43 @@ class ETLMonitorFramework:
                 execution_id, project_code, process_load, processing_date
             )
 
-        seq_filt = f"AND SequenceID = {sequence_id}" if sequence_id is not None else ""
-        wf_filt  = f"AND WorkFlowID = {workflow_id}"  if workflow_id  is not None else ""
+        params   = self._fqn("ETLconfigParameters")
+        seq_filt = f"AND s.SequenceID = {sequence_id}" if sequence_id is not None else ""
+        wf_filt  = f"AND s.WorkFlowID = {workflow_id}" if workflow_id  is not None else ""
 
+        # Mirrors p_ETLProcessingSteps output (GenerateMode=0):
+        #   Status      — NQUE/RQUE/FAIL; callers skip execution if NULL/DONE
+        #   FullFileName — computed file name (e.g. payroll_uk_202604.csv); NULL for non-file tasks
+        #   InFilePath  — ADLS/storage base folder path; combine with FullFileName for full file URL
+        #   WatermarkType / WatermarkValue — joined from ETLconfigParameters on SourceSystemCode;
+        #     ADF reads WatermarkValue (as STRING) for @concat() source query parameterisation.
+        #     Equivalent to the #DELTAPARAMETER# resolved value in the original SQL Server framework.
         return self.spark.sql(f"""
             SELECT
-                Status, ExecutionID, ProjectCode, ProcessLoad,
-                WorkFlowID, SequenceID, TaskID,
-                TaskName, SequenceCode, TaskMandatory, SourceSystemCode,
-                SourceType, Attempts, StartTime
-            FROM {steps}
-            WHERE ExecutionID    = '{execution_id}'
-              AND ProcessingDate = '{processing_date}'
-              AND ProjectCode    = '{project_code}'
-              AND ProcessLoad    = '{process_load}'
-              AND Status        != 'DONE'
+                s.Status, s.ExecutionID, s.ProjectCode, s.ProcessLoad,
+                s.WorkFlowID, s.SequenceID, s.TaskID,
+                s.TaskName, s.SequenceCode, s.TaskMandatory, s.SourceSystemCode,
+                s.SourceType, s.Attempts, s.StartTime,
+                s.FullFileName, s.InFilePath, s.OutFilePath,
+                p.ParameterType AS WatermarkType,
+                CASE p.ParameterType
+                    WHEN 'DELTA_DATE' THEN CAST(p.ValueDateTime AS STRING)
+                    WHEN 'DELTA_ID'   THEN CAST(p.ValueINT      AS STRING)
+                    WHEN 'FLAG'       THEN CAST(p.ValueBIT      AS STRING)
+                    ELSE NULL
+                END             AS WatermarkValue
+            FROM {steps} s
+            LEFT JOIN {params} p
+              ON  COALESCE(p.ProjectCode,  '') = COALESCE(s.ProjectCode,    '')
+              AND COALESCE(p.ProcessLoad,  '') = COALESCE(s.ProcessLoad,    '')
+              AND COALESCE(p.ParameterName,'') = COALESCE(s.SourceSystemCode,'')
+            WHERE s.ExecutionID    = '{execution_id}'
+              AND s.ProcessingDate = '{processing_date}'
+              AND s.ProjectCode    = '{project_code}'
+              AND s.ProcessLoad    = '{process_load}'
+              AND s.Status        != 'DONE'
               {seq_filt} {wf_filt}
-            ORDER BY WorkFlowID, SequenceID, TaskID
+            ORDER BY s.WorkFlowID, s.SequenceID, s.TaskID
         """)
 
     # ------------------------------------------------------------------
@@ -1379,6 +1477,13 @@ STEP 5 — Register tasks (once per task)
       task_description         = "...",              # optional
       load_frequency           = "D",                # optional  D/W/M/Y/A  (default: D)
       task_mandatory           = True,               # optional  FAIL blocks downstream stages (default: True)
+      # File-based source tasks (ADLS/storage files):
+      file_name_mask           = "payroll_uk",       # optional  base filename without date suffix
+      file_extension           = ".csv",             # optional  e.g. '.csv', '.xlsx'
+      in_file_path             = "abfss://...",      # optional  ADLS base folder path for input file
+      out_file_path            = "",                 # optional  output path (empty if not needed)
+      # generate_execution_steps() computes FullFileName per LoadFrequency:
+      #   D → payroll_uk_20260409.csv   M → payroll_uk_202604.csv   Y → payroll_uk_2026.csv
   )
   # Initiation task is ALWAYS: task_id=0, workflow_id=0, sequence_id=0
 
@@ -1426,11 +1531,18 @@ STEP 8 — Query status
     v_currentFailures  — all failures today
     v_watermarks       — watermark values + ActiveValue (ADF bridge)
 
-STEP 9 — Retry after failure
-──────────────────────────────
-  monitor.status_reset("HR", "HR_DAILY", execution_id=exec_id)        # all failures
+STEP 9 — Failure retry (new ExecutionID) and day replay (status_reset)
+─────────────────────────────────────────────────────────────────────────
+  # Failure retry — ADF re-triggers with a new RunID = new ExecutionID.
+  # generate_execution_steps auto-detects Attempts+1, skips DONE, inserts NQUE for FAIL/NQUE only.
+  exec_id_2 = ETLMonitorFramework.generate_execution_id()
+  monitor.generate_execution_steps(exec_id_2, "HR", "HR_DAILY", "2026-04-10")
+
+  # Day replay — reset a fully-completed date back to RQUE so it can be re-run.
+  # Only use this for intentional re-processing; it is NOT the failure-retry path.
+  monitor.status_reset("HR", "HR_DAILY", processing_date="2026-04-10")        # full date
   monitor.status_reset("HR", "HR_DAILY", execution_id=exec_id,
-                        task_id=1, workflow_id=1)                      # specific task
+                        task_id=1, workflow_id=1)                              # specific task
 
 OTHER METHODS
 ─────────────
@@ -1581,6 +1693,7 @@ OTHER METHODS
                 e.ExecutionID, e.Attempts, e.WorkFlowID,
                 e.SequenceCode, e.SequenceID,
                 e.TaskName, e.TaskID, e.TaskMandatory, e.SourceSystemCode,
+                e.FullFileName, e.InFilePath, e.OutFilePath,
                 e.Status, e.StartTime, e.EndTime, e.DurationSeconds,
                 e.SourceType, e.SourceRunID,
                 e.LogType, e.LogMessage, e.LastUpdatedBy

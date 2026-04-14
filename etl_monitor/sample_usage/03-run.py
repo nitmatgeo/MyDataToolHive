@@ -74,6 +74,13 @@ print(f"✓ Execution steps generated — Attempts=0, 9 tasks queued as NQUE")
 # COMMAND ----------
 
 # DBTITLE 1,View All Pending Tasks — Run 1
+# get_pending_tasks() output includes:
+#   Status, WorkFlowID, SequenceID, TaskID, TaskName, SequenceCode
+#   FullFileName  — computed file name (e.g. payroll_uk_202604.csv); NULL for non-file tasks
+#   InFilePath    — ADLS base folder path; ADF combines with FullFileName for file URL
+#   WatermarkType — DELTA_DATE / DELTA_ID / FLAG / NULL (no watermark)
+#   WatermarkValue — resolved watermark value as STRING; ADF uses in @concat() source queries
+#     Equivalent to the #DELTAPARAMETER# value from the original SQL Server framework
 monitor.get_pending_tasks(EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE).display()
 
 # COMMAND ----------

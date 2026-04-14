@@ -212,6 +212,14 @@ DDL_STATEMENTS: dict[str, str] = {
                 COMMENT 'ADF pipeline name, Databricks job_id, or notebook workspace path',
             SourceSystemCode        STRING
                 COMMENT 'Links to ETLconfigParameters.ParameterName — which watermark to advance on DONE. NULL for full-load tasks.',
+            FileNameMask            STRING
+                COMMENT 'Base filename without date suffix for file-based source tasks (e.g. payroll_uk). NULL for non-file tasks. Combined with LoadFrequency at generate_execution_steps() time: D→_YYYYMMDD, M→_YYYYMM, Y→_YYYY.',
+            FileExtension           STRING
+                COMMENT 'File extension including the dot (e.g. .csv, .xlsx). Appended after the date suffix. NULL for non-file tasks.',
+            InFilePath              STRING
+                COMMENT 'ADLS/storage base folder path where the input file is expected (e.g. abfss://raw@store.dfs.core.windows.net/payroll/uk/). NULL for non-file tasks.',
+            OutFilePath             STRING
+                COMMENT 'ADLS/storage base folder path for processed or output files. NULL if no separate output location.',
             LoadFrequency           STRING
                 COMMENT 'D=Daily  W=Weekly  M=Monthly  Y=Yearly  A=Ad-hoc',
             TaskMandatory           BOOLEAN
@@ -313,6 +321,9 @@ DDL_STATEMENTS: dict[str, str] = {
             SequenceCode     STRING     COMMENT 'Snapshot of ETLconfigSequence.SequenceCode at generate time',
             TaskMandatory    BOOLEAN    COMMENT 'Snapshot of ETLconfigTasks.TaskMandatory at generate time',
             SourceSystemCode STRING     COMMENT 'Snapshot of ETLconfigTasks.SourceSystemCode at generate time',
+            FullFileName     STRING     COMMENT 'Computed at generate_execution_steps() — FileNameMask + date suffix by LoadFrequency (D→_yyyyMMdd, M→_yyyyMM, Y→_yyyy) + FileExtension. NULL for non-file tasks. Mirrors FullFileName from original SQL Server framework.',
+            InFilePath       STRING     COMMENT 'Snapshot of ETLconfigTasks.InFilePath — ADLS/storage base folder path for input files. NULL for non-file tasks.',
+            OutFilePath      STRING     COMMENT 'Snapshot of ETLconfigTasks.OutFilePath — ADLS/storage output path. NULL if not applicable.',
             StartTime        TIMESTAMP  COMMENT 'When this task began executing',
             EndTime          TIMESTAMP  COMMENT 'When this task finished (NULL while running)',
             DurationSeconds  INT        COMMENT 'DATEDIFF(SECOND, StartTime, EndTime)',
