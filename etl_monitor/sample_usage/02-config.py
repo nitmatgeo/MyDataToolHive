@@ -200,7 +200,6 @@ spark.sql(f"""
         source_identifier         = "/Workspace/Repos/hr-platform/etl/00-initiation",
         task_mandatory            = True,
         load_frequency            = "D",
-        expected_duration_seconds = 30,
     )
     .register_task(
         project_code              = "HR",
@@ -215,7 +214,6 @@ spark.sql(f"""
         source_identifier         = "/Workspace/Repos/hr-platform/employee/01-load-hr-config",
         task_mandatory            = True,
         load_frequency            = "D",
-        expected_duration_seconds = 90,
     )
     .register_task(
         project_code              = "HR",
@@ -231,7 +229,6 @@ spark.sql(f"""
         source_system_code        = "LoadEmployeesUK",
         task_mandatory            = True,
         load_frequency            = "D",
-        expected_duration_seconds = 360,
     )
     .register_task(
         project_code              = "HR",
@@ -247,7 +244,6 @@ spark.sql(f"""
         source_system_code        = "LoadEmployeesUS",
         task_mandatory            = True,
         load_frequency            = "D",
-        expected_duration_seconds = 420,
     )
     .register_task(
         project_code              = "HR",
@@ -263,7 +259,6 @@ spark.sql(f"""
         source_system_code        = "LoadEmployeesIN",
         task_mandatory            = False,
         load_frequency            = "D",
-        expected_duration_seconds = 300,
     )
     .register_task(
         project_code              = "HR",
@@ -279,7 +274,6 @@ spark.sql(f"""
         source_system_code        = "LoadOrgStructure",
         task_mandatory            = False,
         load_frequency            = "D",
-        expected_duration_seconds = 180,
     )
     .register_task(
         project_code              = "HR",
@@ -294,7 +288,6 @@ spark.sql(f"""
         source_identifier         = "/Workspace/Repos/hr-platform/employee/06-process-dim-employees",
         task_mandatory            = True,
         load_frequency            = "D",
-        expected_duration_seconds = 480,
     )
     .register_task(
         project_code              = "HR",
@@ -309,7 +302,6 @@ spark.sql(f"""
         source_identifier         = "/Workspace/Repos/hr-platform/employee/07-apply-hr-rules",
         task_mandatory            = False,
         load_frequency            = "D",
-        expected_duration_seconds = 240,
     )
     .register_task(
         project_code              = "HR",
@@ -323,7 +315,6 @@ spark.sql(f"""
         source_identifier         = "/Workspace/Repos/hr-platform/employee/08-employee-analytics-mart",
         task_mandatory            = True,
         load_frequency            = "D",
-        expected_duration_seconds = 600,
     )
 )
 print("✓ HR / EMPLOYEE_MASTER tasks registered")
@@ -357,7 +348,6 @@ print("✓ HR / EMPLOYEE_MASTER tasks registered")
         source_identifier         = "/Workspace/Repos/hr-platform/etl/00-initiation",
         task_mandatory            = True,
         load_frequency            = "M",
-        expected_duration_seconds = 30,
     )
     .register_task(
         project_code              = "HR",
@@ -372,7 +362,6 @@ print("✓ HR / EMPLOYEE_MASTER tasks registered")
         source_system_code        = "LoadPayrollUK",
         task_mandatory            = True,
         load_frequency            = "M",
-        expected_duration_seconds = 600,
     )
     .register_task(
         project_code              = "HR",
@@ -388,7 +377,6 @@ print("✓ HR / EMPLOYEE_MASTER tasks registered")
         source_system_code        = "LoadPayrollUS",
         task_mandatory            = False,
         load_frequency            = "M",
-        expected_duration_seconds = 480,
     )
     .register_task(
         project_code              = "HR",
@@ -402,7 +390,6 @@ print("✓ HR / EMPLOYEE_MASTER tasks registered")
         source_identifier         = "/Workspace/Repos/hr-platform/payroll/03-apply-payroll-derivations",
         task_mandatory            = True,
         load_frequency            = "M",
-        expected_duration_seconds = 900,
     )
     .register_task(
         project_code              = "HR",
@@ -416,7 +403,6 @@ print("✓ HR / EMPLOYEE_MASTER tasks registered")
         source_identifier         = "/Workspace/Repos/hr-platform/payroll/04-payroll-analytics-mart",
         task_mandatory            = True,
         load_frequency            = "M",
-        expected_duration_seconds = 480,
     )
 )
 print("✓ HR / PAYROLL_MONTHLY tasks registered")
@@ -449,7 +435,6 @@ print("✓ HR / PAYROLL_MONTHLY tasks registered")
         source_identifier         = "/Workspace/Repos/finance-platform/etl/00-initiation",
         task_mandatory            = True,
         load_frequency            = "D",
-        expected_duration_seconds = 30,
     )
     .register_task(
         project_code              = "FINANCE",
@@ -465,7 +450,6 @@ print("✓ HR / PAYROLL_MONTHLY tasks registered")
         source_system_code        = "LoadGLJournals",
         task_mandatory            = True,
         load_frequency            = "D",
-        expected_duration_seconds = 720,
     )
     .register_task(
         project_code              = "FINANCE",
@@ -481,7 +465,6 @@ print("✓ HR / PAYROLL_MONTHLY tasks registered")
         source_system_code        = "LoadAccountBalances",
         task_mandatory            = False,
         load_frequency            = "D",
-        expected_duration_seconds = 360,
     )
     .register_task(
         project_code              = "FINANCE",
@@ -496,7 +479,6 @@ print("✓ HR / PAYROLL_MONTHLY tasks registered")
         source_identifier         = "/Workspace/Repos/finance-platform/gl/03-finance-reporting-mart",
         task_mandatory            = True,
         load_frequency            = "D",
-        expected_duration_seconds = 900,
     )
 )
 print("✓ FINANCE / GL_DAILY tasks registered")
@@ -529,7 +511,6 @@ print("✓ FINANCE / GL_DAILY tasks registered")
         source_identifier         = "/Workspace/Repos/finance-platform/etl/00-initiation",
         task_mandatory            = True,
         load_frequency            = "Y",
-        expected_duration_seconds = 30,
     )
     .register_task(
         project_code              = "FINANCE",
@@ -543,7 +524,6 @@ print("✓ FINANCE / GL_DAILY tasks registered")
         source_identifier         = "pl_finance_ingest_annual_positions",
         task_mandatory            = True,
         load_frequency            = "Y",
-        expected_duration_seconds = 3600,
     )
     .register_task(
         project_code              = "FINANCE",
@@ -558,7 +538,6 @@ print("✓ FINANCE / GL_DAILY tasks registered")
         source_identifier         = "abfss://raw@financedatalake.dfs.core.windows.net/regulatory/annual/disclosures/",
         task_mandatory            = False,
         load_frequency            = "Y",
-        expected_duration_seconds = 1800,
     )
     .register_task(
         project_code              = "FINANCE",
@@ -572,7 +551,6 @@ print("✓ FINANCE / GL_DAILY tasks registered")
         source_identifier         = "/Workspace/Repos/finance-platform/regulatory/03-regulatory-pack",
         task_mandatory            = True,
         load_frequency            = "Y",
-        expected_duration_seconds = 7200,
     )
 )
 print("✓ FINANCE / REGULATORY_ANNUAL tasks registered")
@@ -583,8 +561,7 @@ print("✓ FINANCE / REGULATORY_ANNUAL tasks registered")
 spark.sql(f"""
     SELECT t.ProjectCode, t.ProcessLoad, t.WorkFlowID, t.SequenceID,
            s.SequenceCode, t.TaskID, t.TaskName, t.SourceType,
-           t.SourceSystemCode, t.TaskMandatory, t.LoadFrequency,
-           t.ExpectedDurationSeconds
+           t.SourceSystemCode, t.TaskMandatory, t.LoadFrequency
     FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`ETLconfigTasks` t
     JOIN `{MY_CATALOG}`.`{ETL_SCHEMA}`.`ETLconfigSequence` s
       ON t.SequenceID = s.SequenceID

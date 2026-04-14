@@ -54,8 +54,7 @@ monitor.register_task("CORP", "HR_DAILY", task_id=0, workflow_id=0, sequence_id=
                       task_name="Initiation", source_type="DBX_NOTEBOOK")
 monitor.register_task("CORP", "HR_DAILY", task_id=1, workflow_id=1, sequence_id=2,
                       task_name="Load Employees", source_type="DBX_NOTEBOOK",
-                      source_system_code="LoadEmployees", task_mandatory=True,
-                      expected_duration_seconds=300)
+                      source_system_code="LoadEmployees", task_mandatory=True)
 
 # Register watermarks (once)
 monitor.register_parameter("CORP", "HR_DAILY", "SYSDT", "SYSTEM")

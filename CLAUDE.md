@@ -176,6 +176,79 @@ All active tasks sharing `(WorkFlowID, SequenceID)` for a process are **intended
 The ADF ForEach / Databricks Workflow fan-out handles the actual parallelism.
 Developer designs the fan-out accordingly.
 
+## Enterprise multi-org design intent
+
+**Design goal:** a single deployed instance of this framework (one catalog + `etl` schema)
+can serve an entire enterprise — multiple subsidiaries, divisions, delivery units, or clients —
+all sharing the same 8 Delta tables and 6 views without namespace collision.
+
+### The four-level hierarchy
+
+```
+Unity Catalog        ← environment / platform isolation (DEV / UAT / PROD)
+  ETLOrganisation    ← subsidiary / division / delivery unit / client entity
+    ETLconfigProject ← programme / department / project within an org
+      ETLconfigProcess (ProjectCode + ProcessLoad)
+                     ← individual data workstream within a project
+```
+
+### Why this structure exists
+
+| Layer | Original SQL Server | DBX framework | Why changed |
+|---|---|---|---|
+| Org | `ETLOrganisation` (single org row in practice) | `ETLOrganisation` | Explicit — supports multi-subsidiary, multi-client setups |
+| Project | `ETLconfigProject` (one project per deployment) | `ETLconfigProject` | Explicit — multiple programmes under one org |
+| Process | Not modelled — `ProcessLoad` was a free VARCHAR | `ETLconfigProcess` | **NEW** — promotes ProcessLoad to a first-class registered entity |
+| Catalog | Not applicable (SQL Server = one DB per env) | Unity Catalog | Replaces the SQL Server database-per-environment pattern |
+
+### Typical deployment patterns
+
+**Pattern A — Single org, single project** (simplest):
+```
+ETLOrganisation: CORP
+ETLconfigProject: HR        (under CORP)
+ETLconfigProcess: HR / EMPLOYEE_MASTER
+                  HR / PAYROLL_MONTHLY
+```
+
+**Pattern B — Single org, multiple departments** (most common enterprise use):
+```
+ETLOrganisation: CORP
+ETLconfigProject: HR        (under CORP)
+                  FINANCE   (under CORP)
+                  SUPPLY    (under CORP)
+ETLconfigProcess: HR / EMPLOYEE_MASTER
+                  FINANCE / GL_DAILY
+                  SUPPLY / INVENTORY_DAILY
+```
+
+**Pattern C — Multi-subsidiary or multi-client on one platform**
+(e.g. a shared Databricks workspace serving multiple business units or clients):
+```
+ETLOrganisation: CORP_UK
+                 CORP_US
+                 CORP_APAC
+ETLconfigProject: HR_UK    (under CORP_UK)
+                  HR_US    (under CORP_US)
+ETLconfigProcess: HR_UK / EMPLOYEE_MASTER
+                  HR_US / EMPLOYEE_MASTER   ← fully independent watermarks + execution history
+```
+
+All three patterns share **the same 8 tables** — the `OrganisationCode → ProjectCode → ProcessLoad`
+composite key ensures complete isolation between entities without needing separate schemas or catalogs.
+
+### When to use a separate catalog instead
+
+Use a **separate Unity Catalog** (not just separate org/project rows) when:
+- Different subsidiaries or clients must have **hard access control boundaries**
+  (e.g. client A must never be able to query client B's execution history)
+- Regulatory or contractual requirements mandate physical data separation
+
+Use **the same catalog with separate `OrganisationCode`** when:
+- All entities are within the same trust boundary (e.g. internal business units)
+- A central data engineering team manages the framework for all units
+- You want one dashboard (`v_processStatus`) showing cross-org run health
+
 ## ProcessLoad scoping (enhancement over original SQL Server framework)
 
 Original framework used `(ProjectCode, ParameterName)` as the parameter key. This caused

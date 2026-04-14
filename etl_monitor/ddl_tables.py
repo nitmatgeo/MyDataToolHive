@@ -216,8 +216,6 @@ DDL_STATEMENTS: dict[str, str] = {
                 COMMENT 'D=Daily  W=Weekly  M=Monthly  Y=Yearly  A=Ad-hoc',
             TaskMandatory           BOOLEAN
                 COMMENT 'TRUE = processing must not advance past this SequenceID stage if this task FAILs. FALSE or NULL = non-mandatory (pipeline continues even if this task FAILs).',
-            ExpectedDurationSeconds INT
-                COMMENT 'SLA baseline — v_taskDetail flags rows where DurationSeconds exceeds this',
             IsActive                BOOLEAN
                 COMMENT 'FALSE = skip from new runs without deleting history',
             CreatedOn               TIMESTAMP

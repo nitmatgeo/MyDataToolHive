@@ -361,7 +361,6 @@ class ETLMonitorFramework:
         task_description: str = "",
         load_frequency: str = "D",
         task_mandatory: bool = True,
-        expected_duration_seconds: Optional[int] = None,
     ) -> "ETLMonitorFramework":
         """
         Register (or update) a task in ETLconfigTasks.
@@ -386,9 +385,8 @@ class ETLMonitorFramework:
         - ``source_system_code``        — matches ETLconfigParameters.ParameterName for watermark advance.
                                           Leave empty (``""``) for full-load tasks with no delta watermark. (default: ``""``)
         - ``task_description``          — longer description (default: ``""``)
-        - ``load_frequency``            — ``"D"`` | ``"W"`` | ``"M"`` (default: ``"D"``)
+        - ``load_frequency``            — ``"D"`` | ``"W"`` | ``"M"`` | ``"Y"`` | ``"A"`` (default: ``"D"``)
         - ``task_mandatory``            — if True, a FAIL blocks downstream SequenceID stages (default: ``True``)
-        - ``expected_duration_seconds`` — SLA baseline; v_taskDetail flags breaches (default: ``None``)
 
         MERGE behaviour:
           - INSERT on first call (new composite key).
@@ -398,7 +396,6 @@ class ETLMonitorFramework:
         Returns self for optional method chaining.
         """
         fqn     = self._fqn("ETLconfigTasks")
-        dur_sql = str(expected_duration_seconds) if expected_duration_seconds is not None else "NULL"
         ssc_sql = f"'{source_system_code}'" if source_system_code else "NULL"
 
         self.spark.sql(f"""
@@ -415,8 +412,7 @@ class ETLMonitorFramework:
                 '{source_identifier}'  AS SourceIdentifier,
                 {ssc_sql}              AS SourceSystemCode,
                 '{load_frequency}'     AS LoadFrequency,
-                {str(task_mandatory).upper()}  AS TaskMandatory,
-                {dur_sql}              AS ExpectedDurationSeconds
+                {str(task_mandatory).upper()}  AS TaskMandatory
             ) AS src
             ON  tgt.TaskID       = src.TaskID
             AND tgt.WorkFlowID   = src.WorkFlowID
@@ -430,8 +426,7 @@ class ETLMonitorFramework:
                 COALESCE(tgt.SourceIdentifier,        '') <> COALESCE(src.SourceIdentifier,        '') OR
                 COALESCE(tgt.SourceSystemCode,        '') <> COALESCE(src.SourceSystemCode,        '') OR
                 COALESCE(tgt.LoadFrequency,           '') <> COALESCE(src.LoadFrequency,           '') OR
-                COALESCE(tgt.TaskMandatory,        FALSE) <> COALESCE(src.TaskMandatory,        FALSE) OR
-                COALESCE(tgt.ExpectedDurationSeconds, -1) <> COALESCE(src.ExpectedDurationSeconds, -1)
+                COALESCE(tgt.TaskMandatory,        FALSE) <> COALESCE(src.TaskMandatory,        FALSE)
             ) THEN UPDATE SET
                 tgt.SequenceID              = src.SequenceID,
                 tgt.TaskName                = src.TaskName,
@@ -441,21 +436,19 @@ class ETLMonitorFramework:
                 tgt.SourceSystemCode        = src.SourceSystemCode,
                 tgt.LoadFrequency           = src.LoadFrequency,
                 tgt.TaskMandatory           = src.TaskMandatory,
-                tgt.ExpectedDurationSeconds = src.ExpectedDurationSeconds,
                 tgt.LastUpdatedOn           = current_timestamp(),
                 tgt.LastUpdatedBy           = current_user()
             WHEN NOT MATCHED THEN INSERT (
                 TaskID, ProjectCode, ProcessLoad, WorkFlowID, SequenceID,
                 TaskName, TaskDescription, SourceType, SourceIdentifier,
-                SourceSystemCode, LoadFrequency, TaskMandatory,
-                ExpectedDurationSeconds, IsActive,
+                SourceSystemCode, LoadFrequency, TaskMandatory, IsActive,
                 CreatedOn, CreatedBy, LastUpdatedOn, LastUpdatedBy
             ) VALUES (
                 src.TaskID, src.ProjectCode, src.ProcessLoad, src.WorkFlowID,
                 src.SequenceID, src.TaskName, src.TaskDescription,
                 src.SourceType, src.SourceIdentifier, src.SourceSystemCode,
-                src.LoadFrequency, src.TaskMandatory, src.ExpectedDurationSeconds,
-                TRUE, current_timestamp(), current_user(),
+                src.LoadFrequency, src.TaskMandatory, TRUE,
+                current_timestamp(), current_user(),
                 current_timestamp(), current_user()
             )
         """)
@@ -619,7 +612,7 @@ class ETLMonitorFramework:
         execution_id: str,
         project_code: str,
         process_load: str,
-        processing_date: str,
+        processing_date: Optional[str] = None,
         sequence_id: Optional[int] = None,
         workflow_id: Optional[int] = None,
     ):
@@ -627,7 +620,19 @@ class ETLMonitorFramework:
         Return all non-DONE tasks for this run ordered by WorkFlowID / SequenceID / TaskID.
         Auto-generates steps if none exist yet (mirrors p_ETLOrchestrationSteps first-call behaviour).
         Tasks sharing a SequenceID should be dispatched in parallel by the orchestrator.
+
+        **execution_id** options:
+          - ADF pipeline run ID:  pass ``pipeline().RunId`` from ADF expression via widget.
+            ``execution_id = dbutils.widgets.get("execution_id")``
+          - Databricks-generated: use ``ETLMonitorFramework.generate_execution_id()`` when
+            ADF is not orchestrating (e.g. direct DBX Workflow runs or ad-hoc notebook runs).
+
+        **processing_date** — defaults to today's date (``current_date()``) if not supplied.
         """
+        from datetime import date as _date
+        if processing_date is None:
+            processing_date = str(_date.today())
+
         steps = self._fqn("ETLProcessingSteps")
 
         count = self.spark.sql(f"""
@@ -1280,7 +1285,6 @@ STEP 5 — Register tasks (once per task)
       task_description         = "...",              # optional
       load_frequency           = "D",                # optional  D/W/M/Y/A  (default: D)
       task_mandatory           = True,               # optional  FAIL blocks downstream stages (default: True)
-      expected_duration_seconds= 300,                # optional  SLA baseline for v_taskDetail breach flag
   )
   # Initiation task is ALWAYS: task_id=0, workflow_id=0, sequence_id=0
 
@@ -1484,15 +1488,9 @@ OTHER METHODS
                 e.SequenceCode, e.SequenceID,
                 e.TaskName, e.TaskID, e.TaskMandatory, e.SourceSystemCode,
                 e.Status, e.StartTime, e.EndTime, e.DurationSeconds,
-                t.ExpectedDurationSeconds,
-                CASE WHEN e.DurationSeconds > t.ExpectedDurationSeconds
-                     THEN TRUE ELSE FALSE END AS SLABreached,
                 e.SourceType, e.SourceRunID,
                 e.LogType, e.LogMessage, e.LastUpdatedBy
             FROM {steps} e
-            LEFT JOIN {tasks} t
-              ON e.TaskID=t.TaskID AND e.ProjectCode=t.ProjectCode
-             AND e.ProcessLoad=t.ProcessLoad AND e.WorkFlowID=t.WorkFlowID
         """)
 
         self.spark.sql(f"""
