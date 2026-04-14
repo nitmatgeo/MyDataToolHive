@@ -5,7 +5,7 @@
 # MAGIC - Generate execution steps (NQUE rows for all active tasks)
 # MAGIC - Simulate task start, completion and failure for HR / EMPLOYEE_MASTER
 # MAGIC - Demonstrate mandatory blocker behaviour
-# MAGIC - Retry a failed task
+# MAGIC - Retry via a new ExecutionID — framework skips DONE tasks, picks up FAIL/NQUE only
 # MAGIC - Query results via all 6 reporting views
 # MAGIC - Show processing mode switching
 # MAGIC
@@ -27,6 +27,15 @@
 # MAGIC
 # MAGIC Tasks 2, 3, 4, 5 share SequenceID=2 — they run **in parallel** in production.
 # MAGIC Here they run sequentially for demonstration clarity.
+# MAGIC
+# MAGIC ## Retry pattern — how it works
+# MAGIC When a run fails, the next attempt uses a **new ExecutionID** (mirrors how ADF issues
+# MAGIC a new pipeline RunID on re-trigger). Calling `generate_execution_steps` with the new ID:
+# MAGIC - Detects existing rows on this date → Attempts = MAX + 1
+# MAGIC - Skips tasks already DONE (carries forward without re-running)
+# MAGIC - Creates new NQUE rows (Attempts=1) only for FAIL / NQUE tasks
+# MAGIC
+# MAGIC `status_reset()` is for **day replay** (re-running an already-completed day), not failure retry.
 
 # COMMAND ----------
 
@@ -36,40 +45,36 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 1 — Generate an Execution ID and Execution Steps
+# MAGIC ## Step 1 — Generate Execution ID and Steps (Run 1, Attempts=0)
 
 # COMMAND ----------
 
-# DBTITLE 1,Generate a New Execution ID for This Run
+# DBTITLE 1,Generate Execution ID for Run 1
 # ── ExecutionID sources ────────────────────────────────────────────────────────
 # Option A — ADF orchestration: ADF passes pipeline().RunId as a widget value.
 #   EXECUTION_ID = dbutils.widgets.get("execution_id")
 #
 # Option B — Databricks-generated (used here for demo): framework generates a UUID.
-#   Use this for direct Databricks Workflow runs or ad-hoc notebook runs.
 EXECUTION_ID    = ETLMonitorFramework.generate_execution_id()
 PROJECT_CODE    = "HR"
 PROCESS_LOAD    = "EMPLOYEE_MASTER"
-PROCESSING_DATE = "2026-04-13"   # ← change to your processing date or omit (defaults to today)
+PROCESSING_DATE = "2026-04-13"
 
-print(f"Execution ID     : {EXECUTION_ID}")
-print(f"Project / Process: {PROJECT_CODE} / {PROCESS_LOAD}")
-print(f"Processing date  : {PROCESSING_DATE}")
+print(f"Run 1 Execution ID : {EXECUTION_ID}")
+print(f"Project / Process  : {PROJECT_CODE} / {PROCESS_LOAD}")
+print(f"Processing date    : {PROCESSING_DATE}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Generate Execution Steps (NQUE rows for all active tasks)
-# Creates one NQUE row per active task in ETLProcessingSteps.
-# Snapshot columns (TaskName, SequenceCode, TaskMandatory, SourceSystemCode)
-# are captured at this point — history remains accurate even if the catalogue changes later.
+# DBTITLE 1,Generate Execution Steps — Run 1 (Attempts=0, all 9 tasks)
+# First call for this date → Attempts=0, all active tasks inserted as NQUE.
 monitor.generate_execution_steps(EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE)
-print(f"✓ Execution steps generated for ExecutionID: {EXECUTION_ID}")
+print(f"✓ Execution steps generated — Attempts=0, 9 tasks queued as NQUE")
 
 # COMMAND ----------
 
-# DBTITLE 1,View All Pending Tasks for This Execution
-# processing_date is optional — defaults to today's date when omitted.
-monitor.get_pending_tasks(EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD).display()
+# DBTITLE 1,View All Pending Tasks — Run 1
+monitor.get_pending_tasks(EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE).display()
 
 # COMMAND ----------
 
@@ -79,11 +84,9 @@ monitor.get_pending_tasks(EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD).display()
 # COMMAND ----------
 
 # DBTITLE 1,Read Watermarks Before Loading
-# Each delta task reads its watermark to build the incremental source query.
-# NULL = first run / bulk mode (load everything from source).
-wm_uk = monitor.get_active_watermark(PROJECT_CODE, PROCESS_LOAD, "LoadEmployeesUK")
-wm_us = monitor.get_active_watermark(PROJECT_CODE, PROCESS_LOAD, "LoadEmployeesUS")
-wm_in = monitor.get_active_watermark(PROJECT_CODE, PROCESS_LOAD, "LoadEmployeesIN")
+wm_uk  = monitor.get_active_watermark(PROJECT_CODE, PROCESS_LOAD, "LoadEmployeesUK")
+wm_us  = monitor.get_active_watermark(PROJECT_CODE, PROCESS_LOAD, "LoadEmployeesUS")
+wm_in  = monitor.get_active_watermark(PROJECT_CODE, PROCESS_LOAD, "LoadEmployeesIN")
 wm_org = monitor.get_active_watermark(PROJECT_CODE, PROCESS_LOAD, "LoadOrgStructure")
 
 print(f"UK  employee watermark : {wm_uk}   (None = bulk load)")
@@ -98,9 +101,7 @@ print(f"Org structure watermark: {wm_org}   (None = bulk load)")
 
 # COMMAND ----------
 
-# DBTITLE 1,Run Initiation Task (WorkFlowID=0, TaskID=0, SequenceID=0)
-# The initiation task marks the overall run as started.
-# In production this runs in a dedicated notebook — shown inline here for demonstration.
+# DBTITLE 1,Run Initiation Task (TaskID=0, WF=0, SeqID=0)
 with monitor.task(
     EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
     task_id         = 0,
@@ -110,7 +111,7 @@ with monitor.task(
     source_type     = "DBX_NOTEBOOK",
     log_message     = "Run initiated successfully",
 ):
-    pass   # initiation task has no logic — just marks the run as started
+    pass
 
 print("✓ Initiation task completed")
 
@@ -121,8 +122,7 @@ print("✓ Initiation task completed")
 
 # COMMAND ----------
 
-# DBTITLE 1,Run Config Load Task (TaskID=1, SequenceID=1)
-# Runs first, before the parallel SequenceID=2 ingestion tasks.
+# DBTITLE 1,Run Config Load Task (TaskID=1, SeqID=1)
 with monitor.task(
     EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
     task_id         = 1,
@@ -133,7 +133,7 @@ with monitor.task(
     log_message     = "Department hierarchy, job grades and cost-centre codes loaded: 312 rows",
 ):
     import time
-    time.sleep(1)   # simulate work
+    time.sleep(1)
 
 print("✓ Config load task completed")
 
@@ -142,14 +142,13 @@ print("✓ Config load task completed")
 # MAGIC %md
 # MAGIC ## Step 5 — Run WorkFlowID=1, SequenceID=2 (Parallel Ingestion)
 # MAGIC In production ADF/Databricks Workflow dispatches Tasks 2, 3, 4, 5 in parallel.
-# MAGIC They are run sequentially here for demonstration.
+# MAGIC Run sequentially here for demonstration.
 
 # COMMAND ----------
 
 # DBTITLE 1,Simulate UK Employee Load FAILURE (TaskID=2, mandatory ADF_PIPELINE)
-# Demonstrates how a mandatory task failure surfaces in v_mandatoryBlockers.
-# When a mandatory task FAILs, the initiation task (TaskID=0) is reset to NQUE
-# so the overall run is no longer marked as in-progress.
+# A mandatory task FAIL resets the initiation task (WF=0, Seq=0) to NQUE automatically,
+# marking the overall run as no longer in-progress.
 try:
     with monitor.task(
         EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
@@ -163,19 +162,19 @@ try:
 except Exception as e:
     print(f"Task failed (expected for demo): {e}")
 
-print("✓ Failure captured — task status is now FAIL")
+print("✓ Failure captured — TaskID=2 is now FAIL, LOAD_GO reset to NQUE")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 6 — Query Status After Mandatory Failure
+# MAGIC ## Step 6 — Query Status After Failure
 
 # COMMAND ----------
 
-# DBTITLE 1,Task Detail — Current State of All Tasks
+# DBTITLE 1,Task Detail — State After Failure (Run 1)
 spark.sql(f"""
     SELECT TaskID, WorkFlowID, SequenceID, SequenceCode, TaskName,
-           Status, StartTime, EndTime, DurationSeconds, LogMessage
+           Attempts, Status, StartTime, EndTime, DurationSeconds, LogMessage
     FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`v_taskDetail`
     WHERE ExecutionID = '{EXECUTION_ID}'
     ORDER BY WorkFlowID, SequenceID, TaskID
@@ -183,8 +182,7 @@ spark.sql(f"""
 
 # COMMAND ----------
 
-# DBTITLE 1,Mandatory Blockers — Tasks Preventing Downstream Progress
-# TaskID=2 is mandatory — its FAIL blocks all downstream tasks in this execution.
+# DBTITLE 1,Mandatory Blockers — TaskID=2 Blocking All Downstream Tasks
 spark.sql(f"""
     SELECT * FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`v_mandatoryBlockers`
     WHERE ExecutionID = '{EXECUTION_ID}'
@@ -202,27 +200,68 @@ spark.sql(f"""
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 7 — Reset Failed Task and Retry
+# MAGIC ## Step 7 — Retry via New ExecutionID (Attempts=1)
+# MAGIC
+# MAGIC In production, ADF issues a new pipeline RunID when it re-triggers after failure.
+# MAGIC That new RunID becomes the new ExecutionID. Here we simulate the same pattern.
+# MAGIC
+# MAGIC `generate_execution_steps` with the new ID:
+# MAGIC - Detects existing rows on `2026-04-13` → Attempts = 0+1 = **1**
+# MAGIC - TaskID=1 (config): already DONE at Attempts=0 → **skipped, not re-run**
+# MAGIC - TaskID=2 (UK load): FAIL at Attempts=0, no DONE row → **new NQUE row at Attempts=1**
+# MAGIC - TaskID=3,4,5: NQUE at Attempts=0 (not yet started) → **new NQUE rows at Attempts=1**
+# MAGIC - TaskID=0,6,7,8: NQUE/not-DONE → **new NQUE rows at Attempts=1**
 
 # COMMAND ----------
 
-# DBTITLE 1,Reset UK Employee Task for Retry (FAIL → RQUE)
-# Pass task_id + workflow_id to reset a specific task only.
-# Omit both to reset all FAIL rows in the run.
-monitor.status_reset(
-    PROJECT_CODE, PROCESS_LOAD,
-    execution_id = EXECUTION_ID,
-    task_id      = 2,
-    workflow_id  = 1,
-)
-print("✓ TaskID=2 reset to RQUE — ready for retry")
+# DBTITLE 1,Simulate ADF Re-trigger — New ExecutionID
+# In ADF: this is automatically pipeline().RunId of the re-triggered pipeline.
+# Here: generate a fresh UUID to simulate the re-trigger.
+EXECUTION_ID_2 = ETLMonitorFramework.generate_execution_id()
+print(f"Run 2 Execution ID : {EXECUTION_ID_2}   (Attempts=1 — retry)")
 
 # COMMAND ----------
 
-# DBTITLE 1,Retry UK Employee Load (ADF_PIPELINE) — Succeeds on Second Attempt
-# Attempts counter increments on each retry.
+# DBTITLE 1,Generate Execution Steps — Run 2 (Attempts=1, skips DONE tasks)
+monitor.generate_execution_steps(EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE)
+print("✓ Execution steps generated — Attempts=1")
+print("  TaskID=1 (config, DONE on Attempts=0) → skipped")
+print("  All other tasks → new NQUE rows at Attempts=1")
+
+# COMMAND ----------
+
+# DBTITLE 1,View Pending Tasks — Run 2 (TaskID=1 absent — already done)
+# TaskID=1 does not appear because it completed successfully on Attempts=0.
+# The orchestrator (ADF ForEach / Databricks Workflow) only sees non-DONE tasks.
+monitor.get_pending_tasks(EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE).display()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 8 — Complete the Retry Run
+
+# COMMAND ----------
+
+# DBTITLE 1,Run Initiation Task — Run 2 (Attempts=1)
 with monitor.task(
-    EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
+    EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD,
+    task_id         = 0,
+    workflow_id     = 0,
+    sequence_id     = 0,
+    processing_date = PROCESSING_DATE,
+    source_type     = "DBX_NOTEBOOK",
+    log_message     = "Retry run initiated",
+):
+    pass
+
+print("✓ Initiation task completed (Attempts=1)")
+
+# COMMAND ----------
+
+# DBTITLE 1,Retry UK Employee Load (TaskID=2, Attempts=1) — Succeeds
+# start_task auto-detects Attempts=1 from the NQUE row — no manual tracking needed.
+with monitor.task(
+    EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD,
     task_id         = 2,
     workflow_id     = 1,
     sequence_id     = 2,
@@ -231,15 +270,15 @@ with monitor.task(
     log_message     = "UK employees loaded from SAP HR: 4,821 records (delta since last watermark)",
 ):
     import time
-    time.sleep(1)   # simulate work
+    time.sleep(1)
 
-print("✓ UK employee load task completed on retry — DELTA_DATE watermark auto-advanced")
+print("✓ UK employee load succeeded on retry — DELTA_DATE watermark auto-advanced")
 
 # COMMAND ----------
 
-# DBTITLE 1,US Employee Load (TaskID=3, mandatory)
+# DBTITLE 1,US Employee Load (TaskID=3, Attempts=1)
 with monitor.task(
-    EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
+    EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD,
     task_id         = 3,
     workflow_id     = 1,
     sequence_id     = 2,
@@ -254,10 +293,9 @@ print("✓ US employee load completed — DELTA_DATE watermark auto-advanced")
 
 # COMMAND ----------
 
-# DBTITLE 1,India Employee Load (TaskID=4, non-mandatory)
-# Non-mandatory — failure here does NOT block downstream stages.
+# DBTITLE 1,India Employee Load (TaskID=4, Attempts=1, non-mandatory)
 with monitor.task(
-    EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
+    EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD,
     task_id         = 4,
     workflow_id     = 1,
     sequence_id     = 2,
@@ -272,9 +310,9 @@ print("✓ India employee load completed — DELTA_DATE watermark auto-advanced"
 
 # COMMAND ----------
 
-# DBTITLE 1,Org Structure Feed (TaskID=5, non-mandatory)
+# DBTITLE 1,Org Structure Feed (TaskID=5, Attempts=1, non-mandatory)
 with monitor.task(
-    EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
+    EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD,
     task_id         = 5,
     workflow_id     = 1,
     sequence_id     = 2,
@@ -289,8 +327,7 @@ print("✓ Org structure feed completed — DELTA_DATE watermark auto-advanced")
 
 # COMMAND ----------
 
-# DBTITLE 1,Verify Watermarks Auto-Advanced After DONE (SequenceID=2 tasks)
-# All four DELTA_DATE watermarks were auto-advanced to each task's StartTime on DONE.
+# DBTITLE 1,Verify Watermarks Auto-Advanced (SequenceID=2 tasks, Attempts=1)
 spark.sql(f"""
     SELECT ParameterName, ParameterType, ActiveValue, ValueDateTime
     FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`v_watermarks`
@@ -301,14 +338,9 @@ spark.sql(f"""
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Step 8 — Run WorkFlowID=2 (Processing)
-
-# COMMAND ----------
-
-# DBTITLE 1,Process Employee Dimensions (TaskID=6, SequenceID=3, mandatory)
+# DBTITLE 1,Process Employee Dimensions (TaskID=6, Attempts=1)
 with monitor.task(
-    EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
+    EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD,
     task_id         = 6,
     workflow_id     = 2,
     sequence_id     = 3,
@@ -323,9 +355,9 @@ print("✓ Employee dimension processing completed")
 
 # COMMAND ----------
 
-# DBTITLE 1,Apply HR Business Rules (TaskID=7, SequenceID=5, non-mandatory)
+# DBTITLE 1,Apply HR Business Rules (TaskID=7, Attempts=1, non-mandatory)
 with monitor.task(
-    EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
+    EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD,
     task_id         = 7,
     workflow_id     = 2,
     sequence_id     = 5,
@@ -340,9 +372,9 @@ print("✓ HR business rules applied")
 
 # COMMAND ----------
 
-# DBTITLE 1,Build Employee Analytics Mart (TaskID=8, SequenceID=6, mandatory)
+# DBTITLE 1,Build Employee Analytics Mart (TaskID=8, Attempts=1)
 with monitor.task(
-    EXECUTION_ID, PROJECT_CODE, PROCESS_LOAD,
+    EXECUTION_ID_2, PROJECT_CODE, PROCESS_LOAD,
     task_id         = 8,
     workflow_id     = 2,
     sequence_id     = 6,
@@ -353,7 +385,7 @@ with monitor.task(
     import time
     time.sleep(1)
 
-print("✓ Employee analytics mart built — run complete")
+print("✓ Employee analytics mart built — retry run complete")
 
 # COMMAND ----------
 
@@ -362,17 +394,29 @@ print("✓ Employee analytics mart built — run complete")
 
 # COMMAND ----------
 
-# DBTITLE 1,Task Detail — All Tasks DONE
-monitor.get_status(PROJECT_CODE, PROCESS_LOAD, execution_id=EXECUTION_ID).display()
+# DBTITLE 1,Task Detail — Retry Run Complete (Run 2)
+# Shows all 8 tasks that ran in Run 2 at Attempts=1.
+# TaskID=1 (config) is absent — it was DONE on Run 1 and not re-inserted.
+monitor.get_status(PROJECT_CODE, PROCESS_LOAD, execution_id=EXECUTION_ID_2).display()
 
 # COMMAND ----------
 
-# DBTITLE 1,Run Summary — This Execution
-monitor.get_status(PROJECT_CODE, PROCESS_LOAD, summary_mode=True).display()
+# DBTITLE 1,Full Execution History — Both Runs on This Date
+# Shows Attempts=0 (Run 1) and Attempts=1 (Run 2) side by side.
+# TaskID=1 appears once (Attempts=0, DONE). TaskID=2 appears twice (FAIL then DONE).
+spark.sql(f"""
+    SELECT Attempts, TaskID, WorkFlowID, SequenceID, SequenceCode, TaskName,
+           Status, DurationSeconds, LogMessage
+    FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`v_taskDetail`
+    WHERE ProjectCode = 'HR'
+      AND ProcessLoad = 'EMPLOYEE_MASTER'
+      AND ProcessingDate = '{PROCESSING_DATE}'
+    ORDER BY Attempts, WorkFlowID, SequenceID, TaskID
+""").display()
 
 # COMMAND ----------
 
-# DBTITLE 1,Process Status — Cross-Process Dashboard
+# DBTITLE 1,Run Summary — Cross-Process Dashboard
 spark.sql(f"""
     SELECT * FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`v_processStatus`
     WHERE ProcessingDate = '{PROCESSING_DATE}'
@@ -381,7 +425,7 @@ spark.sql(f"""
 
 # COMMAND ----------
 
-# DBTITLE 1,Run Summary View — All Executions Today
+# DBTITLE 1,Run Summary View — All Executions on This Date
 spark.sql(f"""
     SELECT * FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`v_runSummary`
     WHERE ProcessingDate = '{PROCESSING_DATE}'
@@ -391,7 +435,25 @@ spark.sql(f"""
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 10 — Processing Mode Examples
+# MAGIC ## Step 10 — Day Replay via status_reset
+# MAGIC
+# MAGIC `status_reset` resets **DONE → RQUE** — use this when a completed day needs to be
+# MAGIC **fully re-processed** (e.g. data quality issue found after the run finished).
+# MAGIC
+# MAGIC This is **not** the failure-retry path. For failure retry: use a new ExecutionID
+# MAGIC and call `generate_execution_steps` — the framework handles the rest.
+
+# COMMAND ----------
+
+# DBTITLE 1,Reset Entire Day for Replay (DONE → RQUE, all tasks on this date)
+# Resets all tasks across all executions for this processing date back to RQUE.
+monitor.status_reset(PROJECT_CODE, PROCESS_LOAD, processing_date=PROCESSING_DATE)
+print(f"✓ All DONE tasks for {PROCESSING_DATE} reset to RQUE — ready for full day replay")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 11 — Processing Mode Examples
 
 # COMMAND ----------
 
@@ -403,7 +465,6 @@ print("✓ Bulk mode enabled — next run will perform a full reload for all del
 # COMMAND ----------
 
 # DBTITLE 1,Switch to Historic Rerun Mode
-# Sets SYSDT to a specific past date — useful for replaying a historical processing date.
 monitor.set_processing_mode(
     PROJECT_CODE, PROCESS_LOAD,
     is_historic_mode = True,
@@ -414,7 +475,6 @@ print("✓ Historic mode enabled — SYSDT = 2026-03-01")
 # COMMAND ----------
 
 # DBTITLE 1,Restore Live Mode (default)
-# Clears SYSDT and restores normal incremental operation.
 monitor.set_processing_mode(PROJECT_CODE, PROCESS_LOAD)
 print("✓ Live mode restored")
 

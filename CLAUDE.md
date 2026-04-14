@@ -32,17 +32,20 @@ Current version: see `pyproject.toml`.
 ```
 ETLMonitorFramework(spark, catalog, schema="etl")
     └── setup()                        → schema + tables + views + seed (idempotent)
-    └── register_process(...)          → INSERT-ONLY MERGE into ETLconfigProcess
-    └── register_task(...)             → INSERT-ONLY MERGE into ETLconfigTasks
-    └── register_parameter(...)        → INSERT-ONLY MERGE into ETLconfigParameters
-    └── generate_execution_steps(...)  → INSERT NQUE rows for all active tasks
+    └── register_organisation(...)     → INSERT/UPDATE MERGE into ETLOrganisation
+    └── register_project(...)          → INSERT/UPDATE MERGE into ETLconfigProject
+    └── register_process(...)          → INSERT/UPDATE MERGE into ETLconfigProcess
+    └── register_task(...)             → INSERT/UPDATE MERGE into ETLconfigTasks
+    └── register_parameter(...)        → INSERT/UPDATE MERGE into ETLconfigParameters
+    └── generate_execution_steps(...)  → INSERT NQUE rows; Attempts-aware (see below)
     └── get_pending_tasks(...)         → non-DONE tasks; auto-generates on first call
     └── task(...)                      → context manager: NQUE → DONE/FAIL
+                                         accepts log_message, log_type, log_code
     └── start_task / end_task / fail_task
     └── advance_watermark(...)         → manual DELTA_ID advance (KNOWN LIMITATION)
     └── get_active_watermark(...)      → returns typed watermark value
     └── get_status(...)                → task detail or summary rollup
-    └── status_reset(...)              → reset FAIL → RQUE for retry
+    └── status_reset(...)              → reset DONE → RQUE for day replay (not failure retry)
     └── set_processing_mode(...)       → bulk / historic / live mode
     └── generate_execution_id()        → static UUID generator
     └── sample_usage(spark)            → extracts bundled sample notebooks to Workspace
@@ -119,8 +122,22 @@ def _fqn(self, name: str) -> str:
 State machine:
 ```
 NQUE → DONE
-NQUE → FAIL → RQUE → DONE
-NQUE → FAIL → RQUE → FAIL → [manual status_reset()] → RQUE → DONE
+NQUE → FAIL                 ← any task failure; LOAD_GO reset to NQUE
+```
+
+Retry path — use a **new ExecutionID** (mirrors ADF re-trigger with new RunID):
+```
+Run 1: NQUE → FAIL  (Attempts=0 row stays as FAIL in history)
+Run 2 (new ExecutionID, same date):
+  generate_execution_steps() → Attempts=1
+    - tasks DONE at Attempts=0 → skipped (not re-inserted)
+    - tasks FAIL/NQUE at Attempts=0 → new NQUE rows at Attempts=1
+  NQUE → DONE  (retry succeeds)
+```
+
+Day replay — `status_reset()` resets DONE → RQUE to re-process a date that already completed:
+```
+DONE → [status_reset()] → RQUE → DONE
 ```
 
 ---
@@ -151,7 +168,7 @@ This was fragile and hard to query. The DBX version replaces it with an explicit
 
 | WorkFlowID | Meaning |
 |-----------|---------|
-| 0 | Initiation task — always `TaskID=0`, `SequenceID=0`; one per process; overall run status indicator. Reset to NQUE on any mandatory FAIL. |
+| 0 | Initiation task — always `TaskID=0`, `SequenceID=0`; one per process; overall run status indicator. Reset to NQUE on **any** task FAIL (mandatory or not). |
 | 1 | First workflow pass (main load) |
 | 2 | Second pass (enrichment / additional fields / second data iteration) |
 | N | Nth iteration over the same data with a different scope |
@@ -272,11 +289,11 @@ histories do not interact.
 
 | Original stored procedure | Python method | Notes |
 |--------------------------|--------------|-------|
-| `p_ETLProcessingSteps` (GenerateMode=1) | `generate_execution_steps()` | INSERT NQUE rows for all active tasks |
+| `p_ETLProcessingSteps` (GenerateMode=1) | `generate_execution_steps()` | First call: all tasks NQUE at Attempts=0. New ExecutionID same date: Attempts+1, skip DONE tasks. Same ExecutionID: no-op. |
 | `p_ETLOrchestrationSteps` | `get_pending_tasks()` | Returns non-DONE tasks; auto-generates on first call |
-| `p_ETLProcessingStatusUpdate` | `end_task()` / `fail_task()` | Status + timing write-back; DELTA_DATE auto-advance on DONE |
+| `p_ETLProcessingStatusUpdate` | `end_task()` / `fail_task()` | Status + timing write-back; DELTA_DATE auto-advance on DONE; LOAD_GO → NQUE on any FAIL |
 | `p_ETLProcessingStatusGet` | `get_status()` | Summary or task-level detail; `summary_mode=True` for rollup |
-| `p_ETLProcessingStatusReset` | `status_reset()` | Bulk or specific task reset; always resets initiation row |
+| `p_ETLProcessingStatusReset` | `status_reset()` | DONE → RQUE for day replay; NOT for failure retry (use new ExecutionID for that) |
 | `p_ETLconfigProcessingMode` | `set_processing_mode()` | Historic mode, live mode, bulk mode, specific param |
 
 ---
@@ -330,6 +347,8 @@ Identical to DQ framework pattern.  Backtick-quoting handles names with hyphens 
 ### Pattern E — Context manager (`with monitor.task(...)`)
 Writes NQUE at entry, DONE on clean exit, FAIL on exception.  UUID generated per run via
 `ETLMonitorFramework.generate_execution_id()`.
+Optional parameters `log_message`, `log_type`, `log_code` (all `str | None`) are passed
+to `end_task()` on DONE; on FAIL the exception string is captured automatically.
 
 ### Pattern F — Snapshot columns in ETLProcessingSteps
 `TaskName`, `SequenceCode`, `TaskMandatory`, `SourceSystemCode` copied from config tables
@@ -417,14 +436,23 @@ monitor.register_task("CORP", "HR_DAILY", task_id=1, workflow_id=1, sequence_id=
                       task_name="Load Employees", source_system_code="LoadEmployees")
 monitor.register_parameter("CORP", "HR_DAILY", "LoadEmployees", "DELTA_DATE")
 
-# Each run
+# Each run — first attempt
 exec_id = ETLMonitorFramework.generate_execution_id()
 monitor.generate_execution_steps(exec_id, "CORP", "HR_DAILY", "2026-04-09")
 
 with monitor.task(exec_id, "CORP", "HR_DAILY",
                   task_id=1, workflow_id=1, sequence_id=2,
-                  processing_date="2026-04-09"):
+                  processing_date="2026-04-09",
+                  log_message="Loaded 1234 rows"):
     pass   # your notebook logic here
+
+# Failure retry — ADF re-triggers with a new RunID = new ExecutionID
+exec_id_2 = ETLMonitorFramework.generate_execution_id()
+monitor.generate_execution_steps(exec_id_2, "CORP", "HR_DAILY", "2026-04-09")
+# Attempts=1; DONE tasks from exec_id skipped; FAIL/NQUE tasks re-inserted
+
+# Day replay (re-run an already-completed date)
+monitor.status_reset("CORP", "HR_DAILY", processing_date="2026-04-09")  # DONE → RQUE
 ```
 
 ---

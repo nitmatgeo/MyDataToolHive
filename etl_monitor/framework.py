@@ -568,13 +568,55 @@ class ETLMonitorFramework:
     ) -> None:
         """
         Generate NQUE rows in ETLProcessingSteps for all active tasks.
-        Idempotent: skips if rows already exist for this ExecutionID.
-        Snapshots TaskName, SequenceCode, TaskMandatory, SourceSystemCode at generation time.
+        Mirrors ``p_ETLProcessingSteps`` from the original SQL Server framework.
+
+        **First run (no rows for this date+process):**
+        Inserts all active tasks as NQUE with Attempts=0.
+
+        **Same ExecutionID called again:**
+        Idempotent — rows already exist for this ExecutionID, returns immediately.
+
+        **New ExecutionID on the same processing date (retry run — e.g. ADF re-trigger):**
+        Increments Attempts = MAX(Attempts across all rows for this date+process) + 1.
+        Inserts ONLY tasks that do NOT already have a DONE row at a lower Attempts level.
+        Tasks completed (DONE) on a previous attempt are carried forward without re-insertion.
+        FAIL/NQUE tasks get new NQUE rows at the higher Attempts level.
+
+        This mirrors the ADF pattern where each pipeline re-trigger produces a new RunID
+        (ExecutionID). The Attempts counter is a date-level retry counter, not per-execution.
         """
         steps = self._fqn("ETLProcessingSteps")
         tasks = self._fqn("ETLconfigTasks")
         seqs  = self._fqn("ETLconfigSequence")
 
+        # Idempotency — if rows already exist for THIS ExecutionID, skip entirely
+        same_exec = self.spark.sql(f"""
+            SELECT COUNT(*) AS n FROM {steps}
+            WHERE ExecutionID    = '{execution_id}'
+              AND ProcessingDate = '{processing_date}'
+              AND ProjectCode    = '{project_code}'
+              AND ProcessLoad    = '{process_load}'
+        """).collect()[0]["n"]
+
+        if same_exec > 0:
+            logger.info("Steps already exist for exec=%s — skipping generation", execution_id)
+            return
+
+        # Iteration = MAX(Attempts for this date+process) + 1.
+        # First run → no rows exist → COALESCE(-1)+1 = 0.
+        # Retry run  → previous rows exist → next Attempts level.
+        row = self.spark.sql(f"""
+            SELECT COALESCE(MAX(Attempts), -1) + 1 AS NextAttempts
+            FROM {steps}
+            WHERE ProcessingDate = '{processing_date}'
+              AND ProjectCode    = '{project_code}'
+              AND ProcessLoad    = '{process_load}'
+        """).collect()[0]
+        iteration = int(row["NextAttempts"])
+
+        # Insert rows for tasks that have NOT already succeeded (DONE at a previous Attempts).
+        # For Attempts=0: Attempts < 0 is always false → all tasks inserted.
+        # For Attempts=N (retry): tasks with DONE at Attempts < N are skipped.
         self.spark.sql(f"""
             INSERT INTO {steps}
             (ProcessingDate, ProjectCode, ProcessLoad, ExecutionID,
@@ -583,7 +625,7 @@ class ETLMonitorFramework:
              StartTime, LastUpdatedOn, LastUpdatedBy)
             SELECT
                 '{processing_date}', t.ProjectCode, t.ProcessLoad, '{execution_id}',
-                t.WorkFlowID, t.TaskID, t.SequenceID, 0, 'NQUE',
+                t.WorkFlowID, t.TaskID, t.SequenceID, {iteration}, 'NQUE',
                 t.TaskName, s.SequenceCode, t.TaskMandatory, t.SourceSystemCode,
                 current_timestamp(), current_timestamp(), current_user()
             FROM {tasks} t
@@ -593,14 +635,18 @@ class ETLMonitorFramework:
               AND t.IsActive    = TRUE
               AND NOT EXISTS (
                 SELECT 1 FROM {steps} e
-                WHERE e.ExecutionID    = '{execution_id}'
+                WHERE e.Status        = 'DONE'
+                  AND e.Attempts      < {iteration}
                   AND e.ProcessingDate = '{processing_date}'
-                  AND e.ProjectCode    = '{project_code}'
-                  AND e.ProcessLoad    = '{process_load}'
+                  AND e.ProjectCode   = '{project_code}'
+                  AND e.ProcessLoad   = '{process_load}'
+                  AND e.WorkFlowID    = t.WorkFlowID
+                  AND e.TaskID        = t.TaskID
+                  AND e.SequenceID    = t.SequenceID
               )
         """)
-        logger.info("Execution steps generated for %s/%s exec=%s date=%s",
-                    project_code, process_load, execution_id, processing_date)
+        logger.info("Execution steps generated for %s/%s exec=%s date=%s attempts=%d",
+                    project_code, process_load, execution_id, processing_date, iteration)
 
     # ------------------------------------------------------------------
     # Public — get pending tasks
@@ -637,10 +683,7 @@ class ETLMonitorFramework:
 
         count = self.spark.sql(f"""
             SELECT COUNT(*) AS n FROM {steps}
-            WHERE ExecutionID    = '{execution_id}'
-              AND ProcessingDate = '{processing_date}'
-              AND ProjectCode    = '{project_code}'
-              AND ProcessLoad    = '{process_load}'
+            WHERE ExecutionID = '{execution_id}'
         """).collect()[0]["n"]
 
         if count == 0:
@@ -681,15 +724,38 @@ class ETLMonitorFramework:
         sequence_id: int,
         workflow_id: int,
         processing_date: str,
-        attempts: int = 0,
+        attempts: Optional[int] = None,
         source_type: str = "DBX_NOTEBOOK",
         source_run_id: Optional[str] = None,
     ) -> None:
-        """Record task start — MERGE into ETLProcessingSteps."""
+        """Record task start — MERGE into ETLProcessingSteps.
+
+        ``attempts`` is auto-detected from the existing NQUE/RQUE row for this task when
+        not supplied. This handles retry runs (new ExecutionID, Attempts > 0) transparently
+        — callers never need to track the Attempts level themselves.
+        """
+        steps = self._fqn("ETLProcessingSteps")
+
+        if attempts is None:
+            # Look up the Attempts level from the NQUE/RQUE row generated by generate_execution_steps.
+            # For the first run this will be 0; for retry runs (new ExecutionID, same date) it will be 1+.
+            rows = self.spark.sql(f"""
+                SELECT Attempts FROM {steps}
+                WHERE ExecutionID    = '{execution_id}'
+                  AND ProcessingDate = '{processing_date}'
+                  AND ProjectCode    = '{project_code}'
+                  AND ProcessLoad    = '{process_load}'
+                  AND WorkFlowID     = {workflow_id}
+                  AND TaskID         = {task_id}
+                  AND SequenceID     = {sequence_id}
+                  AND Status IN ('NQUE', 'RQUE')
+                LIMIT 1
+            """).collect()
+            attempts = int(rows[0]["Attempts"]) if rows else 0
+
         status     = "RQUE" if attempts > 0 else "NQUE"
         cluster_id = self._get_cluster_id()
         run_id     = source_run_id or self._get_run_id()
-        steps      = self._fqn("ETLProcessingSteps")
         tasks      = self._fqn("ETLconfigTasks")
         seqs       = self._fqn("ETLconfigSequence")
 
@@ -720,13 +786,14 @@ class ETLMonitorFramework:
                   AND t.ProcessLoad = '{process_load}'
                   AND t.WorkFlowID  = {workflow_id}
             ) AS src
-            ON  tgt.ExecutionID = src.ExecutionID
-            AND tgt.ProjectCode = src.ProjectCode
-            AND tgt.ProcessLoad = src.ProcessLoad
-            AND tgt.WorkFlowID  = src.WorkFlowID
-            AND tgt.TaskID      = src.TaskID
-            AND tgt.SequenceID  = src.SequenceID
-            AND tgt.Attempts    = src.Attempts
+            ON  tgt.ExecutionID    = src.ExecutionID
+            AND tgt.ProcessingDate = src.ProcessingDate
+            AND tgt.ProjectCode    = src.ProjectCode
+            AND tgt.ProcessLoad    = src.ProcessLoad
+            AND tgt.WorkFlowID     = src.WorkFlowID
+            AND tgt.TaskID         = src.TaskID
+            AND tgt.SequenceID     = src.SequenceID
+            AND tgt.Attempts       = src.Attempts
             WHEN MATCHED THEN UPDATE SET
                 tgt.Status        = src.Status,
                 tgt.SourceType    = src.SourceType,
@@ -802,13 +869,14 @@ class ETLMonitorFramework:
                 SET
                     p.ValueDateTime = (
                         SELECT e.StartTime FROM {steps} e
-                        WHERE e.ExecutionID = '{execution_id}'
-                          AND e.ProjectCode = '{project_code}'
-                          AND e.ProcessLoad = '{process_load}'
-                          AND e.WorkFlowID  = {workflow_id}
-                          AND e.TaskID      = {task_id}
-                          AND e.SequenceID  = {sequence_id}
-                          AND e.Attempts    = {attempts}
+                        WHERE e.ExecutionID    = '{execution_id}'
+                          AND e.ProcessingDate = '{processing_date}'
+                          AND e.ProjectCode    = '{project_code}'
+                          AND e.ProcessLoad    = '{process_load}'
+                          AND e.WorkFlowID     = {workflow_id}
+                          AND e.TaskID         = {task_id}
+                          AND e.SequenceID     = {sequence_id}
+                          AND e.Attempts       = {attempts}
                     ),
                     p.LastUpdatedOn = current_timestamp(),
                     p.LastUpdatedBy = current_user()
@@ -817,13 +885,14 @@ class ETLMonitorFramework:
                   AND p.ParameterType = 'DELTA_DATE'
                   AND p.ParameterName = (
                     SELECT e.SourceSystemCode FROM {steps} e
-                    WHERE e.ExecutionID = '{execution_id}'
-                      AND e.ProjectCode = '{project_code}'
-                      AND e.ProcessLoad = '{process_load}'
-                      AND e.WorkFlowID  = {workflow_id}
-                      AND e.TaskID      = {task_id}
-                      AND e.SequenceID  = {sequence_id}
-                      AND e.Attempts    = {attempts}
+                    WHERE e.ExecutionID    = '{execution_id}'
+                      AND e.ProcessingDate = '{processing_date}'
+                      AND e.ProjectCode    = '{project_code}'
+                      AND e.ProcessLoad    = '{process_load}'
+                      AND e.WorkFlowID     = {workflow_id}
+                      AND e.TaskID         = {task_id}
+                      AND e.SequenceID     = {sequence_id}
+                      AND e.Attempts       = {attempts}
                   )
             """)
 
@@ -873,13 +942,21 @@ class ETLMonitorFramework:
         task_id: int,
         sequence_id: int,
         workflow_id: int,
-        processing_date: str,
+        processing_date: Optional[str] = None,
         attempts: int = 0,
         source_type: str = "DBX_NOTEBOOK",
+        log_message: Optional[str] = None,
+        log_type: Optional[str] = None,
+        log_code: Optional[str] = None,
     ):
         """
         Context manager: start_task() at entry, end_task(DONE) on clean exit,
         fail_task() on exception.
+
+        ``log_message`` / ``log_type`` / ``log_code`` are written on DONE.
+        On exception, the exception string is captured as the error log_message automatically.
+
+        ``processing_date`` defaults to today's date when not supplied.
 
         Example::
 
@@ -888,10 +965,14 @@ class ETLMonitorFramework:
 
             with monitor.task(exec_id, "CORP", "HR_DAILY",
                               task_id=1, sequence_id=2, workflow_id=1,
-                              processing_date="2026-04-09"):
+                              log_message="Loaded 1,243 rows"):
                 # notebook logic here
                 pass
         """
+        from datetime import date as _date
+        if processing_date is None:
+            processing_date = str(_date.today())
+
         self.start_task(execution_id, project_code, process_load,
                         task_id, sequence_id, workflow_id,
                         processing_date, attempts, source_type)
@@ -899,7 +980,8 @@ class ETLMonitorFramework:
             yield
             self.end_task(execution_id, project_code, process_load,
                           task_id, sequence_id, workflow_id,
-                          processing_date, attempts, status="DONE")
+                          processing_date, attempts, status="DONE",
+                          log_message=log_message, log_type=log_type, log_code=log_code)
         except Exception as exc:
             self.fail_task(execution_id, project_code, process_load,
                            task_id, sequence_id, workflow_id,
@@ -1080,11 +1162,19 @@ class ETLMonitorFramework:
         remark: Optional[str] = None,
     ) -> None:
         """
-        Reset execution steps to RQUE for retry — equivalent to p_ETLProcessingStatusReset.
+        Reset execution steps for replay — equivalent to p_ETLProcessingStatusReset.
 
-        Bulk (no execution_id): all DONE tasks for the ProcessingDate → RQUE.
-        Specific (execution_id given): resolves max Attempts, resets DONE rows,
-        always also resets the initiation task (WF0/SEQ0).
+        **Purpose: day replay, not failure retry.**
+        Resets DONE tasks back to RQUE so a date that already completed can be re-processed
+        (e.g. data quality issue found after the fact, or a historic date re-run).
+
+        **Failure retry is handled differently** — use a new ExecutionID and call
+        ``generate_execution_steps()`` again. It will auto-detect Attempts, skip already-DONE
+        tasks, and create new NQUE rows only for the FAIL/NQUE tasks at Attempts+1.
+
+        **Bulk (no execution_id):** all DONE tasks for the ProcessingDate → RQUE.
+        **Specific (execution_id given):** DONE tasks for that execution → RQUE;
+        also resets the initiation task (WF0/SEQ0) DONE → RQUE.
         """
         steps = self._fqn("ETLProcessingSteps")
 
@@ -1094,6 +1184,8 @@ class ETLMonitorFramework:
         remark_sql = f"'{remark}'" if remark else "NULL"
 
         if not execution_id and attempts is None:
+            # ── Full day replay ─────────────────────────────────────────────
+            # Reset all DONE tasks for this date back to RQUE.
             self.spark.sql(f"""
                 UPDATE {steps}
                 SET Status='RQUE', LogMessage={remark_sql}, LastUpdatedOn=current_timestamp()
@@ -1103,21 +1195,23 @@ class ETLMonitorFramework:
                   AND ProcessLoad='{process_load}'
             """)
         else:
+            # ── Specific execution replay ────────────────────────────────────
             resolved = attempts
-            if execution_id:
+            if execution_id and resolved is None:
                 rows = self.spark.sql(f"""
                     SELECT MAX(Attempts) AS MaxA FROM {steps}
                     WHERE ProcessingDate='{processing_date}'
                       AND ProjectCode='{project_code}' AND ProcessLoad='{process_load}'
                       AND ExecutionID='{execution_id}'
                 """).collect()
-                resolved = rows[0]["MaxA"] if rows else 0
+                resolved = rows[0]["MaxA"] if rows and rows[0]["MaxA"] is not None else 0
 
             wf_filt   = f"AND WorkFlowID={workflow_id}" if workflow_id  is not None else ""
             seq_filt  = f"AND SequenceID={sequence_id}" if sequence_id  is not None else ""
             tsk_filt  = f"AND TaskID={task_id}"         if task_id      is not None else ""
             exec_filt = f"AND ExecutionID='{execution_id}'" if execution_id else ""
 
+            # Reset DONE tasks → RQUE (for replay)
             self.spark.sql(f"""
                 UPDATE {steps}
                 SET Status='RQUE', LogMessage={remark_sql}, LastUpdatedOn=current_timestamp()
@@ -1128,7 +1222,7 @@ class ETLMonitorFramework:
                   AND Attempts<={resolved}
                   {exec_filt} {wf_filt} {seq_filt} {tsk_filt}
             """)
-            # Always reset initiation task (mirrors original SP)
+            # Always also reset initiation task (WF0/SEQ0) DONE → RQUE
             self.spark.sql(f"""
                 UPDATE {steps}
                 SET Status='RQUE', LogMessage={remark_sql}, LastUpdatedOn=current_timestamp()
