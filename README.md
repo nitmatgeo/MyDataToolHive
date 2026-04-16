@@ -281,7 +281,7 @@ For teams migrating from the SQL Server / ADF version:
 ```python
 monitor.set_processing_mode("CORP", "HR_DAILY", is_bulk_mode=True)          # full reload
 monitor.set_processing_mode("CORP", "HR_DAILY", is_historic_mode=True,
-                             historic_date="2026-01-01")                     # historic rerun
+                             processing_date="2026-01-01")                   # historic rerun
 monitor.set_processing_mode("CORP", "HR_DAILY")                             # restore live mode
 ```
 

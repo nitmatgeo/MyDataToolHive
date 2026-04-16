@@ -1573,7 +1573,7 @@ OTHER METHODS
   monitor.advance_watermark("CORP", "HR_DAILY", "LoadByID", new_int_value=99999)  # DELTA_ID only
   monitor.set_processing_mode("CORP", "HR_DAILY", is_bulk_mode=True)    # full reload
   monitor.set_processing_mode("CORP", "HR_DAILY", is_historic_mode=True,
-                               historic_date="2026-01-01")               # historic rerun
+                               processing_date="2026-01-01")             # historic rerun
   monitor.set_processing_mode("CORP", "HR_DAILY")                       # restore live mode
   monitor.sample_usage(spark)                                            # extract sample notebooks
 """.rstrip())

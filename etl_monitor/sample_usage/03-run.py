@@ -475,7 +475,7 @@ print("✓ Bulk mode enabled — next run will perform a full reload for all del
 monitor.set_processing_mode(
     PROJECT_CODE, PROCESS_LOAD,
     is_historic_mode = True,
-    historic_date    = "2026-03-01",
+    processing_date  = "2026-03-01",
 )
 print("✓ Historic mode enabled — SYSDT = 2026-03-01")
 
