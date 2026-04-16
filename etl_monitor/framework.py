@@ -1190,7 +1190,18 @@ class ETLMonitorFramework:
         steps = self._fqn("ETLProcessingSteps")
 
         if not processing_date:
-            processing_date = self._resolve_processing_date(project_code, process_load)
+            if execution_id:
+                # When ExecutionID is known, look up its ProcessingDate directly from the steps
+                # table. Do NOT use SYSDT — the execution may be for a historical date and
+                # _resolve_processing_date() would return today, yielding zero rows.
+                rows = self.spark.sql(f"""
+                    SELECT ProcessingDate FROM {steps}
+                    WHERE ExecutionID = '{execution_id}'
+                    LIMIT 1
+                """).collect()
+                processing_date = str(rows[0]["ProcessingDate"]) if rows else None
+            else:
+                processing_date = self._resolve_processing_date(project_code, process_load)
 
         if summary_mode:
             date_filt = f"AND ProcessingDate = '{processing_date}'" if processing_date else ""
@@ -1277,7 +1288,15 @@ class ETLMonitorFramework:
         steps = self._fqn("ETLProcessingSteps")
 
         if not processing_date:
-            processing_date = self._resolve_processing_date(project_code, process_load)
+            if execution_id:
+                rows = self.spark.sql(f"""
+                    SELECT ProcessingDate FROM {steps}
+                    WHERE ExecutionID = '{execution_id}'
+                    LIMIT 1
+                """).collect()
+                processing_date = str(rows[0]["ProcessingDate"]) if rows else None
+            else:
+                processing_date = self._resolve_processing_date(project_code, process_load)
 
         remark_sql = f"'{remark}'" if remark else "NULL"
 
@@ -1370,7 +1389,9 @@ class ETLMonitorFramework:
                 UPDATE {params}
                 SET ValueDateTime='{processing_date}',
                     LastUpdatedOn=current_timestamp(), LastUpdatedBy=current_user()
-                WHERE ProjectCode='{project_code}' AND ParameterName='SYSDT'
+                WHERE ProjectCode='{project_code}'
+                  AND COALESCE(ProcessLoad,'') = COALESCE('{process_load}','')
+                  AND ParameterName='SYSDT'
                   AND ParameterType='SYSTEM'
             """)
         else:
@@ -1378,7 +1399,9 @@ class ETLMonitorFramework:
                 UPDATE {params}
                 SET ValueDateTime=NULL,
                     LastUpdatedOn=current_timestamp(), LastUpdatedBy=current_user()
-                WHERE ProjectCode='{project_code}' AND ParameterName='SYSDT'
+                WHERE ProjectCode='{project_code}'
+                  AND COALESCE(ProcessLoad,'') = COALESCE('{process_load}','')
+                  AND ParameterName='SYSDT'
                   AND ParameterType='SYSTEM'
             """)
 
