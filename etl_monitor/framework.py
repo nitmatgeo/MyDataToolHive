@@ -825,12 +825,20 @@ class ETLMonitorFramework:
         attempts: Optional[int] = None,
         source_type: str = "DBX_NOTEBOOK",
         source_run_id: Optional[str] = None,
+        timestamp: Optional[str] = None,
     ) -> None:
         """Record task start — MERGE into ETLProcessingSteps.
 
         ``attempts`` is auto-detected from the existing NQUE/RQUE row for this task when
         not supplied. This handles retry runs (new ExecutionID, Attempts > 0) transparently
         — callers never need to track the Attempts level themselves.
+
+        ``timestamp`` — optional ISO timestamp string (e.g. ``"2026-04-14T08:30:00"``).
+        Pass the actual compute start time reported by a DBX job or ADF pipeline activity
+        when it differs from the moment this utility notebook is called.
+        Defaults to ``current_timestamp()`` when not supplied.
+        Same parameter name as end_task/fail_task — all three utility notebooks share
+        a single ``timestamp`` widget.
         """
         steps = self._fqn("ETLProcessingSteps")
 
@@ -856,6 +864,7 @@ class ETLMonitorFramework:
         run_id     = source_run_id or self._get_run_id()
         tasks      = self._fqn("ETLconfigTasks")
         seqs       = self._fqn("ETLconfigSequence")
+        start_ts   = f"CAST('{timestamp}' AS TIMESTAMP)" if timestamp else "current_timestamp()"
 
         self.spark.sql(f"""
             MERGE INTO {steps} AS tgt
@@ -897,7 +906,7 @@ class ETLMonitorFramework:
                 tgt.SourceType    = src.SourceType,
                 tgt.SourceRunID   = src.SourceRunID,
                 tgt.ClusterID     = src.ClusterID,
-                tgt.StartTime     = current_timestamp(),
+                tgt.StartTime     = {start_ts},
                 tgt.LastUpdatedOn = current_timestamp()
             WHEN NOT MATCHED THEN INSERT (
                 ProcessingDate, ProjectCode, ProcessLoad, ExecutionID,
@@ -910,7 +919,7 @@ class ETLMonitorFramework:
                 src.WorkFlowID, src.TaskID, src.SequenceID, src.Attempts, src.Status,
                 src.TaskName, src.SequenceCode, src.TaskMandatory, src.SourceSystemCode,
                 src.SourceType, src.SourceRunID, src.ClusterID,
-                current_timestamp(), current_timestamp(), current_user()
+                {start_ts}, current_timestamp(), current_user()
             )
         """)
 
@@ -928,6 +937,7 @@ class ETLMonitorFramework:
         log_message: Optional[str] = None,
         log_type: Optional[str] = None,
         log_code: Optional[str] = None,
+        timestamp: Optional[str] = None,
     ) -> None:
         """
         Write DONE or FAIL — equivalent to p_ETLProcessingStatusUpdate.
@@ -935,19 +945,28 @@ class ETLMonitorFramework:
         On DONE: auto-advances DELTA_DATE watermark to task StartTime.
         On FAIL: resets initiation task (WF0/SEQ0) back to NQUE.
         DELTA_ID watermarks are NOT auto-advanced — call advance_watermark() manually.
+
+        ``timestamp`` — optional ISO timestamp string (e.g. ``"2026-04-14T08:31:05"``).
+        Pass the actual compute end time reported by a DBX job or ADF pipeline activity
+        when it differs from the moment this utility notebook is called.
+        ``DurationSeconds`` is computed from ``StartTime`` to ``timestamp`` (or
+        ``current_timestamp()`` when not supplied).
+        Same parameter name as start_task/fail_task — all three utility notebooks share
+        a single ``timestamp`` widget.
         """
         steps  = self._fqn("ETLProcessingSteps")
         params = self._fqn("ETLconfigParameters")
         msg_sql   = f"'{log_message}'" if log_message else "NULL"
         ltype_sql = f"'{log_type}'"   if log_type    else "NULL"
         lcode_sql = f"'{log_code}'"   if log_code    else "NULL"
+        end_ts    = f"CAST('{timestamp}' AS TIMESTAMP)" if timestamp else "current_timestamp()"
 
         self.spark.sql(f"""
             UPDATE {steps}
             SET
                 Status          = '{status}',
-                EndTime         = current_timestamp(),
-                DurationSeconds = DATEDIFF(SECOND, StartTime, current_timestamp()),
+                EndTime         = {end_ts},
+                DurationSeconds = DATEDIFF(SECOND, StartTime, {end_ts}),
                 LogMessage      = {msg_sql},
                 LogType         = {ltype_sql},
                 LogCode         = {lcode_sql},
@@ -1018,17 +1037,24 @@ class ETLMonitorFramework:
         workflow_id: int,
         processing_date: str,
         attempts: int = 0,
-        error_message: str = "",
+        log_message: str = "",
         log_code: Optional[str] = None,
+        timestamp: Optional[str] = None,
     ) -> None:
-        """Convenience wrapper: record FAIL with truncated error message."""
+        """Convenience wrapper: record FAIL. Uses the same log_message and timestamp parameters
+        as end_task() so ADF utility notebooks share a single consistent widget set across
+        start_task / end_task / fail_task — no parameter renaming between utility notebooks.
+
+        ``timestamp`` — optional ISO timestamp string. See end_task() for details.
+        """
         self.end_task(
             execution_id, project_code, process_load,
             task_id, sequence_id, workflow_id, processing_date,
             attempts=attempts, status="FAIL",
-            log_message=error_message[:2000],
+            log_message=log_message[:2000] if log_message else None,
             log_type="ERROR",
             log_code=log_code,
+            timestamp=timestamp,
         )
 
     @contextmanager
@@ -1083,7 +1109,7 @@ class ETLMonitorFramework:
         except Exception as exc:
             self.fail_task(execution_id, project_code, process_load,
                            task_id, sequence_id, workflow_id,
-                           processing_date, attempts, error_message=str(exc))
+                           processing_date, attempts, log_message=str(exc))
             raise
 
     # ------------------------------------------------------------------

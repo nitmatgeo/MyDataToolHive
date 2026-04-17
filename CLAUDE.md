@@ -429,10 +429,18 @@ ADF Copy Activity source expression:
 ### ADF write-back via utility notebooks
 ADF calls a Databricks Notebook activity passing widget parameters.
 Three lightweight utility notebooks are created per project (not shipped with this package):
-- `etl_start_task.py` — widgets: `execution_id`, `project_code`, `process_load`, `task_id`,
-  `workflow_id`, `sequence_id`, `processing_date`, `source_type` → calls `monitor.start_task(...)`.
-- `etl_end_task.py` — same widgets + `log_message`, `log_type` → calls `monitor.end_task(...)`.
-- `etl_fail_task.py` — same widgets + error details → calls `monitor.fail_task(...)`.
+All three utility notebooks share the same widget set:
+`execution_id`, `project_code`, `process_load`, `task_id`, `workflow_id`, `sequence_id`,
+`processing_date`, `source_type`, `attempts`, `log_message`, `log_type`, `log_code`, `timestamp`
+
+- `etl_start_task.py` → `monitor.start_task(...)` — `timestamp` used as `StartTime`.
+- `etl_end_task.py`   → `monitor.end_task(...)` — `timestamp` used as `EndTime`; `DurationSeconds = StartTime → timestamp`.
+- `etl_fail_task.py`  → `monitor.fail_task(...)` — same `timestamp` semantics as `end_task`.
+
+`timestamp` is an optional ISO timestamp string (e.g. `"2026-04-14T08:30:00"`). Pass the actual
+compute start/end time from the DBX job run or ADF pipeline activity when it differs from the
+moment the utility notebook executes. Defaults to `current_timestamp()` — existing behaviour
+is unchanged when not supplied.
 
 ### ADF ForEach over pending tasks
 ADF ForEach iterates `get_pending_tasks()` output.

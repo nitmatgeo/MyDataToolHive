@@ -488,6 +488,170 @@ print("✓ Live mode restored")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Step 12 — ADF-Style: Explicit start_task / end_task / fail_task
+# MAGIC
+# MAGIC When ADF orchestrates tasks it cannot use the Python `with monitor.task()` context manager
+# MAGIC — each step is a separate ADF pipeline activity.  Instead, three lightweight utility notebooks
+# MAGIC are wired to ADF's **On Success** / **On Failure** dependency edges:
+# MAGIC
+# MAGIC | Method | ADF utility notebook | Triggered by |
+# MAGIC |--------|---------------------|-------------|
+# MAGIC | `start_task()` | `etl_start_task.py` | Always — first activity in the task chain |
+# MAGIC | `end_task()` | `etl_end_task.py` | **On Success** edge from the work activity |
+# MAGIC | `fail_task()` | `etl_fail_task.py` | **On Failure** edge from the work activity |
+# MAGIC
+# MAGIC ADF itself knows whether the work activity succeeded or failed and routes accordingly.
+# MAGIC The `Attempts` value is returned by `get_pending_tasks()` and flows through `item().Attempts`
+# MAGIC in ADF ForEach, so every utility notebook receives the correct attempt number as a widget.
+# MAGIC
+# MAGIC The method names mirror the original SQL Server stored procedure split
+# MAGIC (`p_ETLProcessingStatusUpdate` for DONE and for FAIL) — `start_task`, `end_task`, `fail_task`
+# MAGIC are the standard names; no aliases needed.
+
+# COMMAND ----------
+
+# DBTITLE 1,Generate Fresh ExecutionID for ADF-Style Demo (new processing date)
+# Use a new date to keep this demo independent of the retry scenario above.
+PROCESSING_DATE_ADF = "2026-04-14"
+EXECUTION_ID_ADF = ETLMonitorFramework.generate_execution_id()
+
+print(f"ADF demo Execution ID : {EXECUTION_ID_ADF}")
+print(f"ADF demo date         : {PROCESSING_DATE_ADF}")
+
+monitor.generate_execution_steps(EXECUTION_ID_ADF, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_ADF)
+print("✓ Execution steps generated — Attempts=0, all 9 tasks NQUE")
+
+# COMMAND ----------
+
+# DBTITLE 1,View Pending Tasks — note the Attempts column ADF ForEach passes as a widget
+# In ADF ForEach: each item() row is one task.
+#   item().Attempts → passed as widget to etl_start_task.py, etl_end_task.py, etl_fail_task.py
+#   item().WatermarkValue → passed as ADF expression parameter to the Copy / Notebook activity
+#   item().FullFileName + item().InFilePath → combined for file-based source tasks
+pending_adf = monitor.get_pending_tasks(EXECUTION_ID_ADF, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_ADF)
+pending_adf.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,ADF path — Initiation task: start_task → end_task (On Success)
+# etl_start_task.py receives execution_id, project_code, process_load,
+#   task_id, workflow_id, sequence_id, processing_date, source_type as widgets.
+# etl_end_task.py additionally receives log_message, log_type.
+#
+# start_task() auto-detects Attempts from the NQUE/RQUE row — no need to pass it.
+# end_task() requires attempts so the WHERE clause hits the right row.
+# In ADF ForEach, item().Attempts supplies this to both utility notebooks.
+#
+# Optional timing parameters:
+#   timestamp  — optional ISO timestamp string, same parameter name across all three methods.
+#                start_task: used as StartTime.
+#                end_task / fail_task: used as EndTime; DurationSeconds = StartTime → timestamp.
+#                Pass the actual compute time from the DBX job run or ADF pipeline activity
+#                (e.g. pipeline().TriggerTime, job run start/end from the Runs API).
+#                When omitted, current_timestamp() at the moment of the call is used — existing
+#                behaviour is unchanged.
+
+TASK_ATTEMPTS = 0   # Attempts=0 for first run; in ADF: item().Attempts from ForEach
+
+monitor.start_task(
+    EXECUTION_ID_ADF, PROJECT_CODE, PROCESS_LOAD,
+    task_id         = 0,
+    workflow_id     = 0,
+    sequence_id     = 0,
+    processing_date = PROCESSING_DATE_ADF,
+    source_type     = "DBX_NOTEBOOK",
+    # timestamp     = "2026-04-14T08:30:00",  # optional: actual compute start (DBX/ADF)
+)
+print("→ etl_start_task.py called — task is now in-progress")
+
+# Simulate the actual work here (ADF activity runs between start and end utility notebooks)
+import time; time.sleep(1)
+
+# On Success edge: ADF calls etl_end_task.py → monitor.end_task(status="DONE")
+monitor.end_task(
+    EXECUTION_ID_ADF, PROJECT_CODE, PROCESS_LOAD,
+    task_id         = 0,
+    workflow_id     = 0,
+    sequence_id     = 0,
+    processing_date = PROCESSING_DATE_ADF,
+    attempts        = TASK_ATTEMPTS,
+    status          = "DONE",                       # default — safe to omit, shown for clarity
+    log_message     = "Initiation confirmed by ADF pipeline activity",
+    # timestamp     = "2026-04-14T08:30:05",  # optional: actual compute end (DBX/ADF)
+)
+print("✓ etl_end_task.py called — Initiation task DONE")
+
+# COMMAND ----------
+
+# DBTITLE 1,ADF path — Config task: start_task → fail_task (On Failure)
+# Simulate a work activity that fails in ADF.
+# On Failure edge: ADF calls etl_fail_task.py → monitor.fail_task(log_message=...)
+# fail_task() is a convenience wrapper around end_task(status="FAIL") — the names differ
+# only so utility notebook authors don't need to know the status string.
+
+monitor.start_task(
+    EXECUTION_ID_ADF, PROJECT_CODE, PROCESS_LOAD,
+    task_id         = 1,
+    workflow_id     = 1,
+    sequence_id     = 1,
+    processing_date = PROCESSING_DATE_ADF,
+    source_type     = "DBX_NOTEBOOK",
+)
+print("→ etl_start_task.py called — Config Load task is now in-progress")
+
+# On Failure edge: ADF calls etl_fail_task.py
+monitor.fail_task(
+    EXECUTION_ID_ADF, PROJECT_CODE, PROCESS_LOAD,
+    task_id         = 1,
+    workflow_id     = 1,
+    sequence_id     = 1,
+    processing_date = PROCESSING_DATE_ADF,
+    attempts        = TASK_ATTEMPTS,
+    log_message     = "Source config database unreachable — connection refused (ADF activity error)",
+)
+print("✗ etl_fail_task.py called — Config Load task FAIL; LOAD_GO reset to NQUE")
+
+# COMMAND ----------
+
+# DBTITLE 1,ADF path — UK Load task: start_task → end_task (On Success, ADF_PIPELINE type)
+# This simulates an ADF Copy Activity (or Dataflow) that succeeds.
+# source_type="ADF_PIPELINE" records that the activity was an ADF pipeline — not a DBX notebook.
+
+monitor.start_task(
+    EXECUTION_ID_ADF, PROJECT_CODE, PROCESS_LOAD,
+    task_id         = 2,
+    workflow_id     = 1,
+    sequence_id     = 2,
+    processing_date = PROCESSING_DATE_ADF,
+    source_type     = "ADF_PIPELINE",
+)
+print("→ etl_start_task.py called — UK Load task in-progress (ADF Copy Activity running)")
+
+import time; time.sleep(1)
+
+monitor.end_task(
+    EXECUTION_ID_ADF, PROJECT_CODE, PROCESS_LOAD,
+    task_id         = 2,
+    workflow_id     = 1,
+    sequence_id     = 2,
+    processing_date = PROCESSING_DATE_ADF,
+    attempts        = TASK_ATTEMPTS,
+    log_message     = "UK employees loaded from SAP HR via ADF Copy Activity: 4,821 rows",
+)
+print("✓ etl_end_task.py called — UK Load task DONE; DELTA_DATE watermark auto-advanced")
+
+# COMMAND ----------
+
+# DBTITLE 1,Status After ADF Demo — explicit calls produce the same result as context manager
+# TaskID=0 (Initiation) → DONE via start_task + end_task
+# TaskID=1 (Config)     → FAIL via start_task + fail_task
+# TaskID=2 (UK Load)    → DONE via start_task + end_task
+# TaskID=3–8            → NQUE (not yet started)
+monitor.get_status(PROJECT_CODE, PROCESS_LOAD, execution_id=EXECUTION_ID_ADF).display()
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Cleanup (Optional)
 # MAGIC Run the cell below **only** if you want to tear down all ETL monitoring tables and views from this demo.
 
