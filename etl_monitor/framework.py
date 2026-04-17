@@ -922,6 +922,7 @@ class ETLMonitorFramework:
                 {start_ts}, current_timestamp(), current_user()
             )
         """)
+        return attempts
 
     def end_task(
         self,
@@ -1067,7 +1068,6 @@ class ETLMonitorFramework:
         sequence_id: int,
         workflow_id: int,
         processing_date: Optional[str] = None,
-        attempts: int = 0,
         source_type: str = "DBX_NOTEBOOK",
         log_message: Optional[str] = None,
         log_type: Optional[str] = None,
@@ -1081,6 +1081,10 @@ class ETLMonitorFramework:
         On exception, the exception string is captured as the error log_message automatically.
 
         ``processing_date`` defaults to today's date when not supplied.
+
+        Attempts is always auto-detected from the NQUE/RQUE row for this ExecutionID so that
+        retry runs (new ExecutionID, Attempts > 0) are handled transparently without the caller
+        needing to track or pass the Attempts level.
 
         Example::
 
@@ -1097,19 +1101,21 @@ class ETLMonitorFramework:
         if processing_date is None:
             processing_date = str(_date.today())
 
-        self.start_task(execution_id, project_code, process_load,
-                        task_id, sequence_id, workflow_id,
-                        processing_date, attempts, source_type)
+        # start_task auto-detects Attempts from the NQUE/RQUE row and returns the value used.
+        # end_task and fail_task must use the same Attempts to update the correct row.
+        actual_attempts = self.start_task(execution_id, project_code, process_load,
+                                          task_id, sequence_id, workflow_id,
+                                          processing_date, None, source_type)
         try:
             yield
             self.end_task(execution_id, project_code, process_load,
                           task_id, sequence_id, workflow_id,
-                          processing_date, attempts, status="DONE",
+                          processing_date, actual_attempts, status="DONE",
                           log_message=log_message, log_type=log_type, log_code=log_code)
         except Exception as exc:
             self.fail_task(execution_id, project_code, process_load,
                            task_id, sequence_id, workflow_id,
-                           processing_date, attempts, log_message=str(exc))
+                           processing_date, actual_attempts, log_message=str(exc))
             raise
 
     # ------------------------------------------------------------------
