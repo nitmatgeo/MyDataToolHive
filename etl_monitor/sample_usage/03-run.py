@@ -58,7 +58,7 @@
 EXECUTION_ID    = ETLMonitorFramework.generate_execution_id()
 PROJECT_CODE    = "HR"
 PROCESS_LOAD    = "EMPLOYEE_MASTER"
-PROCESSING_DATE = "2026-04-13"
+PROCESSING_DATE = "2026-04-15"
 
 print(f"Run 1 Execution ID : {EXECUTION_ID}")
 print(f"Project / Process  : {PROJECT_CODE} / {PROCESS_LOAD}")
@@ -180,7 +180,7 @@ print("✓ Failure captured — TaskID=2 is now FAIL, LOAD_GO reset to NQUE")
 
 # DBTITLE 1,Task Detail — State After Failure (Run 1)
 spark.sql(f"""
-    SELECT TaskID, WorkFlowID, SequenceID, SequenceCode, TaskName,
+    SELECT WorkFlowID, SequenceID, TaskID, SequenceCode, TaskName,
            Attempts, Status, StartTime, EndTime, DurationSeconds, LogMessage
     FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`v_taskDetail`
     WHERE ExecutionID = '{EXECUTION_ID}'
@@ -201,7 +201,7 @@ spark.sql(f"""
 spark.sql(f"""
     SELECT * FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`v_currentFailures`
     WHERE ProcessingDate = '{PROCESSING_DATE}'
-    ORDER BY ProjectCode, ProcessLoad, WorkFlowID, TaskID
+    ORDER BY ProjectCode, ProcessLoad, WorkFlowID, SequenceID, TaskID
 """).display()
 
 # COMMAND ----------
@@ -411,14 +411,16 @@ monitor.get_status(PROJECT_CODE, PROCESS_LOAD, execution_id=EXECUTION_ID_2).disp
 # DBTITLE 1,Full Execution History — Both Runs on This Date
 # Shows Attempts=0 (Run 1) and Attempts=1 (Run 2) side by side.
 # TaskID=1 appears once (Attempts=0, DONE). TaskID=2 appears twice (FAIL then DONE).
+# ORDER BY ExecutionID groups each run's tasks together; within each run tasks are in
+# WorkFlowID → SequenceID → TaskID execution order.
 spark.sql(f"""
-    SELECT Attempts, TaskID, WorkFlowID, SequenceID, SequenceCode, TaskName,
+    SELECT ExecutionID, Attempts, WorkFlowID, SequenceID, SequenceCode, TaskID, TaskName,
            Status, DurationSeconds, LogMessage
     FROM `{MY_CATALOG}`.`{ETL_SCHEMA}`.`v_taskDetail`
     WHERE ProjectCode = 'HR'
       AND ProcessLoad = 'EMPLOYEE_MASTER'
       AND ProcessingDate = '{PROCESSING_DATE}'
-    ORDER BY Attempts, WorkFlowID, SequenceID, TaskID
+    ORDER BY ExecutionID, WorkFlowID, SequenceID, TaskID
 """).display()
 
 # COMMAND ----------

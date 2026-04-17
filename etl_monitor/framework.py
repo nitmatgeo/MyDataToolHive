@@ -664,13 +664,13 @@ class ETLMonitorFramework:
         self.spark.sql(f"""
             INSERT INTO {steps}
             (ProcessingDate, ProjectCode, ProcessLoad, ExecutionID,
-             WorkFlowID, TaskID, SequenceID, Attempts, Status,
+             WorkFlowID, SequenceID, TaskID, Attempts, Status,
              TaskName, SequenceCode, TaskMandatory, SourceSystemCode,
              FullFileName, InFilePath, OutFilePath,
              StartTime, LastUpdatedOn, LastUpdatedBy)
             SELECT
                 date('{processing_date}'), t.ProjectCode, t.ProcessLoad, '{execution_id}',
-                t.WorkFlowID, t.TaskID, t.SequenceID, {iteration}, 'NQUE',
+                t.WorkFlowID, t.SequenceID, t.TaskID, {iteration}, 'NQUE',
                 t.TaskName, s.SequenceCode, t.TaskMandatory, t.SourceSystemCode,
                 CASE
                     WHEN t.FileNameMask IS NULL OR t.FileNameMask = '' THEN NULL
@@ -852,8 +852,8 @@ class ETLMonitorFramework:
                   AND ProjectCode    = '{project_code}'
                   AND ProcessLoad    = '{process_load}'
                   AND WorkFlowID     = {workflow_id}
-                  AND TaskID         = {task_id}
                   AND SequenceID     = {sequence_id}
+                  AND TaskID         = {task_id}
                   AND Status IN ('NQUE', 'RQUE')
                 LIMIT 1
             """).collect()
@@ -875,8 +875,8 @@ class ETLMonitorFramework:
                     '{process_load}'    AS ProcessLoad,
                     '{execution_id}'    AS ExecutionID,
                     {workflow_id}       AS WorkFlowID,
-                    {task_id}           AS TaskID,
                     {sequence_id}       AS SequenceID,
+                    {task_id}           AS TaskID,
                     {attempts}          AS Attempts,
                     '{status}'          AS Status,
                     t.TaskName          AS TaskName,
@@ -898,8 +898,8 @@ class ETLMonitorFramework:
             AND tgt.ProjectCode    = src.ProjectCode
             AND tgt.ProcessLoad    = src.ProcessLoad
             AND tgt.WorkFlowID     = src.WorkFlowID
-            AND tgt.TaskID         = src.TaskID
             AND tgt.SequenceID     = src.SequenceID
+            AND tgt.TaskID         = src.TaskID
             AND tgt.Attempts       = src.Attempts
             WHEN MATCHED THEN UPDATE SET
                 tgt.Status        = src.Status,
@@ -910,13 +910,13 @@ class ETLMonitorFramework:
                 tgt.LastUpdatedOn = current_timestamp()
             WHEN NOT MATCHED THEN INSERT (
                 ProcessingDate, ProjectCode, ProcessLoad, ExecutionID,
-                WorkFlowID, TaskID, SequenceID, Attempts, Status,
+                WorkFlowID, SequenceID, TaskID, Attempts, Status,
                 TaskName, SequenceCode, TaskMandatory, SourceSystemCode,
                 SourceType, SourceRunID, ClusterID,
                 StartTime, LastUpdatedOn, LastUpdatedBy
             ) VALUES (
                 src.ProcessingDate, src.ProjectCode, src.ProcessLoad, src.ExecutionID,
-                src.WorkFlowID, src.TaskID, src.SequenceID, src.Attempts, src.Status,
+                src.WorkFlowID, src.SequenceID, src.TaskID, src.Attempts, src.Status,
                 src.TaskName, src.SequenceCode, src.TaskMandatory, src.SourceSystemCode,
                 src.SourceType, src.SourceRunID, src.ClusterID,
                 {start_ts}, current_timestamp(), current_user()
@@ -975,8 +975,8 @@ class ETLMonitorFramework:
               AND ProjectCode    = '{project_code}'
               AND ProcessLoad    = '{process_load}'
               AND WorkFlowID     = {workflow_id}
-              AND TaskID         = {task_id}
               AND SequenceID     = {sequence_id}
+              AND TaskID         = {task_id}
               AND Attempts       = {attempts}
         """)
 
@@ -1753,8 +1753,8 @@ OTHER METHODS
             CREATE OR REPLACE VIEW {self._fqn("v_mandatoryBlockers")} AS
             SELECT
                 e.ProcessingDate, e.ProjectCode, e.ProcessLoad,
-                e.ExecutionID, e.WorkFlowID, e.SequenceCode, e.TaskName,
-                e.TaskID, e.Attempts, e.Status, e.StartTime,
+                e.ExecutionID, e.WorkFlowID, e.SequenceID, e.SequenceCode,
+                e.TaskID, e.TaskName, e.Attempts, e.Status, e.StartTime,
                 e.LogType, e.LogMessage, e.SourceType, e.SourceSystemCode
             FROM {steps} e
             WHERE e.TaskMandatory=TRUE AND e.Status IN ('FAIL','NQUE','RQUE')
@@ -1770,8 +1770,8 @@ OTHER METHODS
             CREATE OR REPLACE VIEW {self._fqn("v_currentFailures")} AS
             SELECT
                 e.ProcessingDate, e.ProjectCode, e.ProcessLoad,
-                e.ExecutionID, e.WorkFlowID, e.SequenceCode, e.TaskName,
-                e.TaskID, e.TaskMandatory, e.Attempts, e.Status, e.StartTime,
+                e.ExecutionID, e.WorkFlowID, e.SequenceID, e.SequenceCode,
+                e.TaskID, e.TaskName, e.TaskMandatory, e.Attempts, e.Status, e.StartTime,
                 e.LogType, e.LogMessage, e.SourceType, e.SourceRunID
             FROM {steps} e
             WHERE e.Status='FAIL'
