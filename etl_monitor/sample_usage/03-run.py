@@ -411,8 +411,9 @@ monitor.get_status(PROJECT_CODE, PROCESS_LOAD, execution_id=EXECUTION_ID_2).disp
 # DBTITLE 1,Full Execution History — Both Runs on This Date
 # Shows Attempts=0 (Run 1) and Attempts=1 (Run 2) side by side.
 # TaskID=1 appears once (Attempts=0, DONE). TaskID=2 appears twice (FAIL then DONE).
-# ORDER BY ExecutionID groups each run's tasks together; within each run tasks are in
-# WorkFlowID → SequenceID → TaskID execution order.
+# ORDER BY Attempts groups each run's tasks chronologically (0 = first run, 1 = retry);
+# within each run tasks are in WorkFlowID → SequenceID → TaskID execution order.
+# ExecutionID is a UUID — it has no chronological meaning so do not ORDER BY it.
 spark.sql(f"""
     SELECT ExecutionID, Attempts, WorkFlowID, SequenceID, SequenceCode, TaskID, TaskName,
            Status, DurationSeconds, LogMessage
@@ -420,7 +421,7 @@ spark.sql(f"""
     WHERE ProjectCode = 'HR'
       AND ProcessLoad = 'EMPLOYEE_MASTER'
       AND ProcessingDate = '{PROCESSING_DATE}'
-    ORDER BY ExecutionID, WorkFlowID, SequenceID, TaskID
+    ORDER BY Attempts, WorkFlowID, SequenceID, TaskID
 """).display()
 
 # COMMAND ----------
@@ -553,7 +554,9 @@ pending_adf.display()
 #                When omitted, current_timestamp() at the moment of the call is used — existing
 #                behaviour is unchanged.
 
-TASK_ATTEMPTS = 0   # Attempts=0 for first run; in ADF: item().Attempts from ForEach
+# start_task() and end_task() / fail_task() each auto-detect Attempts from the live row —
+# no caller tracking needed. In ADF ForEach, item().Attempts (from get_pending_tasks()) can
+# be passed explicitly to skip the lookup, but it is never required.
 
 monitor.start_task(
     EXECUTION_ID_ADF, PROJECT_CODE, PROCESS_LOAD,
@@ -576,7 +579,6 @@ monitor.end_task(
     workflow_id     = 0,
     sequence_id     = 0,
     processing_date = PROCESSING_DATE_ADF,
-    attempts        = TASK_ATTEMPTS,
     status          = "DONE",                       # default — safe to omit, shown for clarity
     log_message     = "Initiation confirmed by ADF pipeline activity",
     # timestamp     = "2026-04-14T08:30:05",  # optional: actual compute end (DBX/ADF)
@@ -608,7 +610,6 @@ monitor.fail_task(
     workflow_id     = 1,
     sequence_id     = 1,
     processing_date = PROCESSING_DATE_ADF,
-    attempts        = TASK_ATTEMPTS,
     log_message     = "Source config database unreachable — connection refused (ADF activity error)",
 )
 print("✗ etl_fail_task.py called — Config Load task FAIL; LOAD_GO reset to NQUE")
@@ -637,7 +638,6 @@ monitor.end_task(
     workflow_id     = 1,
     sequence_id     = 2,
     processing_date = PROCESSING_DATE_ADF,
-    attempts        = TASK_ATTEMPTS,
     log_message     = "UK employees loaded from SAP HR via ADF Copy Activity: 4,821 rows",
 )
 print("✓ etl_end_task.py called — UK Load task DONE; DELTA_DATE watermark auto-advanced")

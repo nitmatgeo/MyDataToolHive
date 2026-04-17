@@ -933,7 +933,7 @@ class ETLMonitorFramework:
         sequence_id: int,
         workflow_id: int,
         processing_date: str,
-        attempts: int = 0,
+        attempts: Optional[int] = None,
         status: str = "DONE",
         log_message: Optional[str] = None,
         log_type: Optional[str] = None,
@@ -947,6 +947,10 @@ class ETLMonitorFramework:
         On FAIL: resets initiation task (WF0/SEQ0) back to NQUE.
         DELTA_ID watermarks are NOT auto-advanced — call advance_watermark() manually.
 
+        ``attempts`` is auto-detected from the in-progress (RQUE) row when not supplied,
+        mirroring the same auto-detection in start_task(). In ADF ForEach, item().Attempts
+        from get_pending_tasks() can still be passed explicitly to skip the lookup.
+
         ``timestamp`` — optional ISO timestamp string (e.g. ``"2026-04-14T08:31:05"``).
         Pass the actual compute end time reported by a DBX job or ADF pipeline activity
         when it differs from the moment this utility notebook is called.
@@ -956,6 +960,23 @@ class ETLMonitorFramework:
         a single ``timestamp`` widget.
         """
         steps  = self._fqn("ETLProcessingSteps")
+
+        if attempts is None:
+            # Look up the Attempts level from the RQUE row set by start_task.
+            # Mirrors start_task's auto-detection so callers never have to track Attempts.
+            rows = self.spark.sql(f"""
+                SELECT Attempts FROM {steps}
+                WHERE ExecutionID    = '{execution_id}'
+                  AND ProcessingDate = '{processing_date}'
+                  AND ProjectCode    = '{project_code}'
+                  AND ProcessLoad    = '{process_load}'
+                  AND WorkFlowID     = {workflow_id}
+                  AND SequenceID     = {sequence_id}
+                  AND TaskID         = {task_id}
+                  AND Status         = 'RQUE'
+                LIMIT 1
+            """).collect()
+            attempts = int(rows[0]["Attempts"]) if rows else 0
         params = self._fqn("ETLconfigParameters")
         msg_sql   = f"'{log_message}'" if log_message else "NULL"
         ltype_sql = f"'{log_type}'"   if log_type    else "NULL"
@@ -1037,7 +1058,7 @@ class ETLMonitorFramework:
         sequence_id: int,
         workflow_id: int,
         processing_date: str,
-        attempts: int = 0,
+        attempts: Optional[int] = None,
         log_message: str = "",
         log_code: Optional[str] = None,
         timestamp: Optional[str] = None,
@@ -1046,6 +1067,7 @@ class ETLMonitorFramework:
         as end_task() so ADF utility notebooks share a single consistent widget set across
         start_task / end_task / fail_task — no parameter renaming between utility notebooks.
 
+        ``attempts`` is auto-detected from the RQUE row when not supplied. See end_task() for details.
         ``timestamp`` — optional ISO timestamp string. See end_task() for details.
         """
         self.end_task(
