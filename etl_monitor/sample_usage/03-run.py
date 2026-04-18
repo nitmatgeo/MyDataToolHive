@@ -654,6 +654,105 @@ monitor.get_status(PROJECT_CODE, PROCESS_LOAD, execution_id=EXECUTION_ID_ADF).di
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Step 13 — Task Activation / Deactivation
+# MAGIC
+# MAGIC The framework controls whether a task runs by setting `IsActive` in `ETLconfigTasks`.
+# MAGIC
+# MAGIC **How it works:**
+# MAGIC - `IsActive = FALSE` → task absent from `get_pending_tasks()` output
+# MAGIC - `get_pending_tasks()` re-joins `ETLconfigTasks` on every call, so deactivation takes
+# MAGIC   effect immediately — even for an ExecutionID that was already generated
+# MAGIC - ADF ForEach sees an empty item list → task never dispatched
+# MAGIC - Notebook/job cell guard sees task absent → skips execution
+# MAGIC
+# MAGIC **Developer contract** — every task cell must guard with `get_pending_tasks()`:
+# MAGIC ```python
+# MAGIC pending = monitor.get_pending_tasks(exec_id, PROJECT_CODE, PROCESS_LOAD, DATE)
+# MAGIC if pending.filter("TaskID = <N>").count() > 0:
+# MAGIC     with monitor.task(...):
+# MAGIC         pass   # actual work
+# MAGIC ```
+# MAGIC
+# MAGIC This is the Python equivalent of the original ADF `PL_WORKER` pattern:
+# MAGIC ```
+# MAGIC p_ETLProcessingSteps → status='NULL' if inactive → IfCondition skips → no work done
+# MAGIC ```
+
+# COMMAND ----------
+
+# DBTITLE 1,Generate a fresh run to demonstrate deactivation
+# Use a new ExecutionID on a new date to keep this demo self-contained.
+PROCESSING_DATE_DEACT = "2026-04-13"
+EXECUTION_ID_DEACT = ETLMonitorFramework.generate_execution_id()
+
+monitor.generate_execution_steps(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT)
+print(f"✓ Execution steps generated — all 9 tasks NQUE")
+
+pending_before = monitor.get_pending_tasks(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT)
+print(f"  Tasks in pending list: {pending_before.count()}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Deactivate a specific task — TaskID=4 (India Employees, non-mandatory)
+# Direct SQL UPDATE on ETLconfigTasks — no framework method needed.
+# IsActive controls whether a task appears in get_pending_tasks() output.
+spark.sql(f"""
+    UPDATE `{MY_CATALOG}`.`{ETL_SCHEMA}`.`ETLconfigTasks`
+    SET    IsActive      = FALSE,
+           LastUpdatedOn = current_timestamp(),
+           LastUpdatedBy = current_user()
+    WHERE  ProjectCode = '{PROJECT_CODE}'
+      AND  ProcessLoad = '{PROCESS_LOAD}'
+      AND  TaskID      = 4
+""")
+print("✓ TaskID=4 (India Employees) deactivated")
+
+# get_pending_tasks() re-joins ETLconfigTasks on every call — deactivation takes effect immediately.
+pending_after = monitor.get_pending_tasks(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT)
+print(f"  Tasks in pending list after deactivation: {pending_after.count()}  (was {pending_before.count()})")
+pending_after.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
+
+# COMMAND ----------
+
+# DBTITLE 1,Cell guard — notebook skips deactivated task automatically
+# This is the developer contract: every task cell checks get_pending_tasks() before running.
+# Deactivated tasks are simply absent — no status row, no NQUE, nothing to process.
+#
+# Scope:
+#   Single cell  → filter by TaskID
+#   Whole notebook → check pending.count() == 0 at the top; exit early if nothing to do
+#       e.g.: if pending.count() == 0: dbutils.notebook.exit("No pending tasks — exiting")
+
+pending = monitor.get_pending_tasks(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT)
+
+# ── Cell guard for a single task ────────────────────────────────────────────
+if pending.filter("TaskID = 4").count() > 0:
+    with monitor.task(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD,
+                      task_id=4, workflow_id=1, sequence_id=2,
+                      processing_date=PROCESSING_DATE_DEACT,
+                      log_message="India employees loaded"):
+        pass   # actual load logic here
+    print("✓ TaskID=4 ran")
+else:
+    print("→ TaskID=4 not in pending list — skipped (IsActive=FALSE)")
+
+# COMMAND ----------
+
+# DBTITLE 1,Re-activate the task (restore for subsequent runs)
+spark.sql(f"""
+    UPDATE `{MY_CATALOG}`.`{ETL_SCHEMA}`.`ETLconfigTasks`
+    SET    IsActive      = TRUE,
+           LastUpdatedOn = current_timestamp(),
+           LastUpdatedBy = current_user()
+    WHERE  ProjectCode = '{PROJECT_CODE}'
+      AND  ProcessLoad = '{PROCESS_LOAD}'
+      AND  TaskID      = 4
+""")
+print("✓ TaskID=4 re-activated — will appear in get_pending_tasks() on next call")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Cleanup (Optional)
 # MAGIC Run the cell below **only** if you want to tear down all ETL monitoring tables and views from this demo.
 

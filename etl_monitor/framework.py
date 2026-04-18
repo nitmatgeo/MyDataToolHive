@@ -780,6 +780,10 @@ class ETLMonitorFramework:
         #   WatermarkType / WatermarkValue — joined from ETLconfigParameters on SourceSystemCode;
         #     ADF reads WatermarkValue (as STRING) for @concat() source query parameterisation.
         #     Equivalent to the #DELTAPARAMETER# resolved value in the original SQL Server framework.
+        tasks = self._fqn("ETLconfigTasks")
+
+        # Re-join ETLconfigTasks to filter out tasks deactivated after generate_execution_steps ran.
+        # Mirrors p_ETLProcessingSteps per-task IsActive re-check in the original SQL Server framework.
         return self.spark.sql(f"""
             SELECT
                 s.Status, s.ExecutionID, s.ProjectCode, s.ProcessLoad,
@@ -795,6 +799,13 @@ class ETLMonitorFramework:
                     ELSE NULL
                 END             AS WatermarkValue
             FROM {steps} s
+            JOIN {tasks} t
+              ON  t.TaskID      = s.TaskID
+              AND t.WorkFlowID  = s.WorkFlowID
+              AND t.SequenceID  = s.SequenceID
+              AND COALESCE(t.ProjectCode, '') = COALESCE(s.ProjectCode, '')
+              AND COALESCE(t.ProcessLoad, '') = COALESCE(s.ProcessLoad, '')
+              AND t.IsActive    = TRUE
             LEFT JOIN {params} p
               ON  COALESCE(p.ProjectCode,  '') = COALESCE(s.ProjectCode,    '')
               AND COALESCE(p.ProcessLoad,  '') = COALESCE(s.ProcessLoad,    '')

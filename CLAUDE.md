@@ -38,7 +38,8 @@ ETLMonitorFramework(spark, catalog, schema="etl")
     └── register_task(...)             → INSERT/UPDATE MERGE into ETLconfigTasks
     └── register_parameter(...)        → INSERT/UPDATE MERGE into ETLconfigParameters
     └── generate_execution_steps(...)  → INSERT NQUE rows; Attempts-aware (see below)
-    └── get_pending_tasks(...)         → non-DONE tasks; auto-generates on first call
+    └── get_pending_tasks(...)         → non-DONE + IsActive=TRUE tasks; re-joins ETLconfigTasks
+                                         so deactivated tasks disappear even if already generated
     └── task(...)                      → context manager: NQUE → DONE/FAIL
                                          accepts log_message, log_type, log_code
     └── start_task / end_task / fail_task
@@ -292,7 +293,7 @@ histories do not interact.
 | Original stored procedure | Python method | Notes |
 |--------------------------|--------------|-------|
 | `p_ETLProcessingSteps` (GenerateMode=1) | `generate_execution_steps()` | First call: all tasks NQUE at Attempts=0. New ExecutionID same date: Attempts+1, skip DONE tasks. Same ExecutionID: no-op. **Period-aware NOT EXISTS:** D=same date, M=same YYYYMM (cross-date skip), Y=same YYYY. **FullFileName computed** by LoadFrequency at generate time. |
-| `p_ETLProcessingSteps` (GenerateMode=0, per-task output) | `get_pending_tasks()` | Returns all non-DONE tasks with `FullFileName`, `InFilePath`, `OutFilePath`, `WatermarkValue`, `WatermarkType`. `WatermarkValue` replaces `#DELTAPARAMETER#` substitution — ADF uses `@concat()` with this value. |
+| `p_ETLProcessingSteps` (GenerateMode=0, per-task output) | `get_pending_tasks()` | Returns non-DONE **and** `IsActive=TRUE` tasks (re-joins `ETLconfigTasks` — deactivated tasks disappear even if already generated). Includes `FullFileName`, `InFilePath`, `OutFilePath`, `WatermarkValue`, `WatermarkType`. **Developer contract:** call once at top of notebook; skip any task not present in the result. This replaces both `p_ETLProcessingSteps(GenerateMode=0)` per-task call and the ADF `IfCondition @not(equals(status,'NULL'))` gate — if a task is absent, it is inactive. |
 | `p_ETLOrchestrationSteps` | `get_pending_tasks()` | Returns non-DONE tasks; auto-generates on first call |
 | `p_ETLProcessingStatusUpdate` | `end_task()` / `fail_task()` | Status + timing write-back; DELTA_DATE auto-advance on DONE; LOAD_GO → NQUE on any FAIL |
 | `p_ETLProcessingStatusGet` | `get_status()` | Summary or task-level detail; `summary_mode=True` for rollup |
