@@ -184,7 +184,7 @@ def analyze_excel_structure(
     msgs: List[str] = []
 
     load_kwargs = {"read_only": False, "data_only": True}
-    if password is not None:   # empty string is a valid password; only None means "no password"
+    if password is not None:
         load_kwargs["password"] = password
     wb = load_workbook(local_path, **load_kwargs)
 
