@@ -113,7 +113,7 @@ def _read_workbook(file_path: str, password: Optional[str]):
     import openpyxl
     local_path = _resolve_local_path(file_path)
     kwargs = {"read_only": True, "data_only": True}
-    if password:
+    if password is not None:   # empty string is a valid password; only None means "no password"
         kwargs["password"] = password
     return openpyxl.load_workbook(local_path, **kwargs)
 
@@ -142,7 +142,7 @@ def _check_password_and_sheets(
     except Exception as exc:
         msg = str(exc).lower()
         if "password" in msg or "encrypted" in msg or "decrypt" in msg:
-            if password:
+            if password is not None:
                 msgs.append("Password provided but incorrect or unsupported encryption.")
             else:
                 msgs.append("File is password-protected — provide a password.")
