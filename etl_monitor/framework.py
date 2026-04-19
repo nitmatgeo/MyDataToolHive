@@ -1977,17 +1977,23 @@ OTHER METHODS
             logger.info("Table ready: %s  %s", fqn, cls)
 
         # Migration — add ForceSkip to ETLProcessingSteps for existing deployments.
-        # CREATE TABLE IF NOT EXISTS skips the DDL when the table already exists,
-        # so existing tables need an explicit ALTER TABLE to pick up new columns.
+        # CREATE TABLE IF NOT EXISTS skips DDL when the table already exists, so
+        # existing tables need an explicit ALTER TABLE to pick up new columns.
+        # Use DESCRIBE TABLE to check first — avoids relying on IF NOT EXISTS syntax
+        # which is not supported on all Databricks runtime versions.
         steps_fqn = self._fqn("ETLProcessingSteps")
-        try:
+        existing_cols = [
+            r["col_name"].lower()
+            for r in self.spark.sql(f"DESCRIBE TABLE {steps_fqn}").collect()
+            if not r["col_name"].startswith("#")
+        ]
+        if "forceskip" not in existing_cols:
             self.spark.sql(f"""
                 ALTER TABLE {steps_fqn}
-                ADD COLUMN IF NOT EXISTS ForceSkip BOOLEAN
+                ADD COLUMN ForceSkip BOOLEAN
                 COMMENT 'Run-level skip flag — see DDL for full description'
             """)
-        except Exception:
-            pass  # table does not exist yet — CREATE TABLE above already included the column
+            logger.info("Migration applied: ForceSkip column added to %s", steps_fqn)
 
     def _create_reporting_views(self) -> None:
         """Create or replace all 6 monitoring views."""
