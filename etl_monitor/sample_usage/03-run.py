@@ -58,7 +58,7 @@
 EXECUTION_ID    = ETLMonitorFramework.generate_execution_id()
 PROJECT_CODE    = "HR"
 PROCESS_LOAD    = "EMPLOYEE_MASTER"
-PROCESSING_DATE = "2026-04-15"
+PROCESSING_DATE = "2026-01-15"
 
 print(f"Run 1 Execution ID : {EXECUTION_ID}")
 print(f"Project / Process  : {PROJECT_CODE} / {PROCESS_LOAD}")
@@ -213,7 +213,7 @@ spark.sql(f"""
 # MAGIC That new RunID becomes the new ExecutionID. Here we simulate the same pattern.
 # MAGIC
 # MAGIC `generate_execution_steps` with the new ID:
-# MAGIC - Detects existing rows on `2026-04-13` → Attempts = 0+1 = **1**
+# MAGIC - Detects existing rows on `2026-01-13` → Attempts = 0+1 = **1**
 # MAGIC - TaskID=1 (config): already DONE at Attempts=0 → **skipped, not re-run**
 # MAGIC - TaskID=2 (UK load): FAIL at Attempts=0, no DONE row → **new NQUE row at Attempts=1**
 # MAGIC - TaskID=3,4,5: NQUE at Attempts=0 (not yet started) → **new NQUE rows at Attempts=1**
@@ -478,9 +478,9 @@ print("✓ Bulk mode enabled — next run will perform a full reload for all del
 monitor.set_processing_mode(
     PROJECT_CODE, PROCESS_LOAD,
     is_historic_mode = True,
-    processing_date  = "2026-03-01",
+    processing_date  = "2026-01-01",
 )
-print("✓ Historic mode enabled — SYSDT = 2026-03-01")
+print("✓ Historic mode enabled — SYSDT = 2026-01-01")
 
 # COMMAND ----------
 
@@ -515,7 +515,7 @@ print("✓ Live mode restored")
 
 # DBTITLE 1,Generate Fresh ExecutionID for ADF-Style Demo (new processing date)
 # Use a new date to keep this demo independent of the retry scenario above.
-PROCESSING_DATE_ADF = "2026-04-14"
+PROCESSING_DATE_ADF = "2026-01-14"
 EXECUTION_ID_ADF = ETLMonitorFramework.generate_execution_id()
 
 print(f"ADF demo Execution ID : {EXECUTION_ID_ADF}")
@@ -565,7 +565,7 @@ monitor.start_task(
     sequence_id     = 0,
     processing_date = PROCESSING_DATE_ADF,
     source_type     = "DBX_NOTEBOOK",
-    # timestamp     = "2026-04-14T08:30:00",  # optional: actual compute start (DBX/ADF)
+    # timestamp     = "2026-01-14T08:30:00",  # optional: actual compute start (DBX/ADF)
 )
 print("→ etl_start_task.py called — task is now in-progress")
 
@@ -581,7 +581,7 @@ monitor.end_task(
     processing_date = PROCESSING_DATE_ADF,
     status          = "DONE",                       # default — safe to omit, shown for clarity
     log_message     = "Initiation confirmed by ADF pipeline activity",
-    # timestamp     = "2026-04-14T08:30:05",  # optional: actual compute end (DBX/ADF)
+    # timestamp     = "2026-01-14T08:30:05",  # optional: actual compute end (DBX/ADF)
 )
 print("✓ etl_end_task.py called — Initiation task DONE")
 
@@ -656,46 +656,30 @@ monitor.get_status(PROJECT_CODE, PROCESS_LOAD, execution_id=EXECUTION_ID_ADF).di
 # MAGIC %md
 # MAGIC ## Step 13 — Task Activation / Deactivation
 # MAGIC
-# MAGIC The framework controls whether a task runs by setting `IsActive` in `ETLconfigTasks`.
+# MAGIC `get_pending_tasks()` re-joins `ETLconfigTasks` on every call.
+# MAGIC Setting `IsActive = FALSE` makes the task immediately absent from its output —
+# MAGIC even for an ExecutionID already generated.
 # MAGIC
-# MAGIC **How it works:**
-# MAGIC - `IsActive = FALSE` → task absent from `get_pending_tasks()` output
-# MAGIC - `get_pending_tasks()` re-joins `ETLconfigTasks` on every call, so deactivation takes
-# MAGIC   effect immediately — even for an ExecutionID that was already generated
-# MAGIC - ADF ForEach sees an empty item list → task never dispatched
-# MAGIC - Notebook/job cell guard sees task absent → skips execution
+# MAGIC **Developer contract for every task cell:**
+# MAGIC 1. Call `get_pending_tasks()` — returns the task row if active, nothing if deactivated
+# MAGIC 2. Display the row (shows WorkFlowID, SequenceID, TaskID, Status etc.)
+# MAGIC 3. If row present → run the task; if absent → print deactivated, skip
 # MAGIC
-# MAGIC **Developer contract** — every task cell must guard with `get_pending_tasks()`:
-# MAGIC ```python
-# MAGIC pending = monitor.get_pending_tasks(exec_id, PROJECT_CODE, PROCESS_LOAD, DATE)
-# MAGIC if pending.filter("TaskID = <N>").count() > 0:
-# MAGIC     with monitor.task(...):
-# MAGIC         pass   # actual work
-# MAGIC ```
-# MAGIC
-# MAGIC This is the Python equivalent of the original ADF `PL_WORKER` pattern:
-# MAGIC ```
-# MAGIC p_ETLProcessingSteps → status='NULL' if inactive → IfCondition skips → no work done
-# MAGIC ```
+# MAGIC Same pattern works at notebook level: check `pending.count() == 0` at the top
+# MAGIC and call `dbutils.notebook.exit("deactivated")` to skip the whole notebook.
 
 # COMMAND ----------
 
-# DBTITLE 1,Generate a fresh run to demonstrate deactivation
-# Use a new ExecutionID on a new date to keep this demo self-contained.
-PROCESSING_DATE_DEACT = "2026-04-13"
-EXECUTION_ID_DEACT = ETLMonitorFramework.generate_execution_id()
+# DBTITLE 1,Setup — generate a fresh run for the deactivation demo
+PROCESSING_DATE_DEACT = "2026-01-13"
+EXECUTION_ID_DEACT    = ETLMonitorFramework.generate_execution_id()
 
 monitor.generate_execution_steps(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT)
-print(f"✓ Execution steps generated — all 9 tasks NQUE")
-
-pending_before = monitor.get_pending_tasks(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT)
-print(f"  Tasks in pending list: {pending_before.count()}")
+print(f"✓ Execution steps generated for {PROCESSING_DATE_DEACT} — 9 tasks NQUE")
 
 # COMMAND ----------
 
-# DBTITLE 1,Deactivate a specific task — TaskID=4 (India Employees, non-mandatory)
-# Direct SQL UPDATE on ETLconfigTasks — no framework method needed.
-# IsActive controls whether a task appears in get_pending_tasks() output.
+# DBTITLE 1,Deactivate TaskID=4 (India Employees)
 spark.sql(f"""
     UPDATE `{MY_CATALOG}`.`{ETL_SCHEMA}`.`ETLconfigTasks`
     SET    IsActive      = FALSE,
@@ -705,40 +689,39 @@ spark.sql(f"""
       AND  ProcessLoad = '{PROCESS_LOAD}'
       AND  TaskID      = 4
 """)
-print("✓ TaskID=4 (India Employees) deactivated")
-
-# get_pending_tasks() re-joins ETLconfigTasks on every call — deactivation takes effect immediately.
-pending_after = monitor.get_pending_tasks(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT)
-print(f"  Tasks in pending list after deactivation: {pending_after.count()}  (was {pending_before.count()})")
-pending_after.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
+print("✓ TaskID=4 deactivated in ETLconfigTasks")
 
 # COMMAND ----------
 
-# DBTITLE 1,Cell guard — notebook skips deactivated task automatically
-# This is the developer contract: every task cell checks get_pending_tasks() before running.
-# Deactivated tasks are simply absent — no status row, no NQUE, nothing to process.
-#
-# Scope:
-#   Single cell  → filter by TaskID
-#   Whole notebook → check pending.count() == 0 at the top; exit early if nothing to do
-#       e.g.: if pending.count() == 0: dbutils.notebook.exit("No pending tasks — exiting")
+# DBTITLE 1,Task cell — DEACTIVATED state (TaskID=4 absent from pending)
+# ── Step 1: read current state for this specific task ───────────────────────
+task_pending = monitor.get_pending_tasks(
+    EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT
+).filter("WorkFlowID = 1 AND SequenceID = 2 AND TaskID = 4")
 
-pending = monitor.get_pending_tasks(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT)
+print(f"ProjectCode : {PROJECT_CODE}")
+print(f"ProcessLoad : {PROCESS_LOAD}")
+print(f"ProcessingDate : {PROCESSING_DATE_DEACT}")
+print(f"Task (WF=1, Seq=2, TID=4) — rows returned: {task_pending.count()}")
+task_pending.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
 
-# ── Cell guard for a single task ────────────────────────────────────────────
-if pending.filter("TaskID = 4").count() > 0:
+# ── Step 2: branch on presence ──────────────────────────────────────────────
+if task_pending.count() > 0:
+    print("→ Task is active — executing India Employee load")
     with monitor.task(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD,
                       task_id=4, workflow_id=1, sequence_id=2,
                       processing_date=PROCESSING_DATE_DEACT,
-                      log_message="India employees loaded"):
+                      log_message="India employees loaded from PeopleSoft: 1,107 records"):
         pass   # actual load logic here
-    print("✓ TaskID=4 ran")
+    print("✓ TaskID=4 completed — status updated to DONE")
 else:
-    print("→ TaskID=4 not in pending list — skipped (IsActive=FALSE)")
+    print("→ Task is DEACTIVATED (IsActive=FALSE) — no row returned — skipping")
+    print("  To reprocess: set IsActive=TRUE to re-activate")
+    print("  To replay a completed day: call monitor.status_reset() then re-activate")
 
 # COMMAND ----------
 
-# DBTITLE 1,Re-activate the task (restore for subsequent runs)
+# DBTITLE 1,Re-activate TaskID=4
 spark.sql(f"""
     UPDATE `{MY_CATALOG}`.`{ETL_SCHEMA}`.`ETLconfigTasks`
     SET    IsActive      = TRUE,
@@ -748,7 +731,33 @@ spark.sql(f"""
       AND  ProcessLoad = '{PROCESS_LOAD}'
       AND  TaskID      = 4
 """)
-print("✓ TaskID=4 re-activated — will appear in get_pending_tasks() on next call")
+print("✓ TaskID=4 re-activated in ETLconfigTasks")
+
+# COMMAND ----------
+
+# DBTITLE 1,Same task cell — ACTIVE state (TaskID=4 now present in pending)
+# Identical code to the cell above — behaviour changes because IsActive is now TRUE.
+task_pending = monitor.get_pending_tasks(
+    EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT
+).filter("WorkFlowID = 1 AND SequenceID = 2 AND TaskID = 4")
+
+print(f"ProjectCode : {PROJECT_CODE}")
+print(f"ProcessLoad : {PROCESS_LOAD}")
+print(f"ProcessingDate : {PROCESSING_DATE_DEACT}")
+print(f"Task (WF=1, Seq=2, TID=4) — rows returned: {task_pending.count()}")
+task_pending.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
+
+if task_pending.count() > 0:
+    print("→ Task is active — executing India Employee load")
+    with monitor.task(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD,
+                      task_id=4, workflow_id=1, sequence_id=2,
+                      processing_date=PROCESSING_DATE_DEACT,
+                      log_message="India employees loaded from PeopleSoft: 1,107 records"):
+        pass
+    print("✓ TaskID=4 completed — status updated to DONE")
+else:
+    print("→ Task is DEACTIVATED (IsActive=FALSE) — no row returned — skipping")
+    print("  To reprocess: set IsActive=TRUE to re-activate")
 
 # COMMAND ----------
 
