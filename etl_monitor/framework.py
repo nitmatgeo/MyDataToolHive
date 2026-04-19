@@ -739,25 +739,45 @@ class ETLMonitorFramework:
         processing_date: Optional[str] = None,
         sequence_id: Optional[int] = None,
         workflow_id: Optional[int] = None,
+        task_id: Optional[int] = None,
     ):
         """
-        Return all non-DONE tasks for this run ordered by WorkFlowID / SequenceID / TaskID.
-        Auto-generates steps if none exist yet (mirrors p_ETLOrchestrationSteps first-call behaviour).
-        Tasks sharing a SequenceID should be dispatched in parallel by the orchestrator.
+        Mirrors ``p_ETLProcessingSteps`` (GenerateMode=0) + ``p_ETLOrchestrationSteps``.
 
-        **execution_id** options:
-          - ADF pipeline run ID:  pass ``pipeline().RunId`` from ADF expression via widget.
-            ``execution_id = dbutils.widgets.get("execution_id")``
-          - Databricks-generated: use ``ETLMonitorFramework.generate_execution_id()`` when
-            ADF is not orchestrating (e.g. direct DBX Workflow runs or ad-hoc notebook runs).
+        **Orchestration mode** (``task_id`` not supplied):
+          Returns all non-DONE, IsActive=TRUE tasks for this run.
+          Used by ADF ForEach (per SequenceID) and notebook batch processing.
+          Filter by ``workflow_id`` / ``sequence_id`` to scope to a stage.
 
-        **processing_date** — defaults to today's date (``current_date()``) if not supplied.
+        **Per-task worker mode** (``task_id`` supplied — also pass ``workflow_id`` + ``sequence_id``):
+          Always returns exactly one row.  ``Status`` column:
+          - ``'NQUE'`` / ``'RQUE'`` / ``'FAIL'`` — task is active and runnable → execute work
+          - ``'NULL'`` (string) — task is DONE, deactivated (``IsActive=FALSE``), or not generated → skip
+          Replicates the original SQL Server ``FROM (SELECT 'NULL' AS STATUS) … LEFT JOIN`` pattern.
+
+        **Developer contract for every task cell / ADF worker:**
+        ::
+
+            row = monitor.get_pending_tasks(exec_id, PROJECT, PROCESS, DATE,
+                                            workflow_id=1, sequence_id=2, task_id=4).first()
+            row.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").show()
+            if row["Status"] != 'NULL':
+                with monitor.task(exec_id, PROJECT, PROCESS,
+                                  task_id=4, workflow_id=1, sequence_id=2,
+                                  processing_date=DATE):
+                    pass  # actual work
+            else:
+                print("skipping — deactivated, done, or not generated")
+
+        Auto-generates execution steps on first call if none exist yet.
         """
         from datetime import date as _date
         if processing_date is None:
             processing_date = str(_date.today())
 
-        steps = self._fqn("ETLProcessingSteps")
+        steps  = self._fqn("ETLProcessingSteps")
+        tasks  = self._fqn("ETLconfigTasks")
+        params = self._fqn("ETLconfigParameters")
 
         count = self.spark.sql(f"""
             SELECT COUNT(*) AS n FROM {steps}
@@ -769,21 +789,62 @@ class ETLMonitorFramework:
                 execution_id, project_code, process_load, processing_date
             )
 
-        params   = self._fqn("ETLconfigParameters")
+        watermark_expr = f"""
+            CASE p.ParameterType
+                WHEN 'DELTA_DATE' THEN CAST(p.ValueDateTime AS STRING)
+                WHEN 'DELTA_ID'   THEN CAST(p.ValueINT      AS STRING)
+                WHEN 'FLAG'       THEN CAST(p.ValueBIT      AS STRING)
+                ELSE NULL
+            END AS WatermarkValue"""
+
+        if task_id is not None:
+            # ── Per-task worker mode ─────────────────────────────────────────────
+            # Guaranteed single row. Status='NULL' (string) when task should be skipped.
+            # Mirrors: FROM (SELECT 'NULL' AS STATUS) STATUS LEFT JOIN ETLProcessingSteps S
+            #          ON S.status IN ('NQUE','RQUE','FAIL') AND S.TaskID = @TaskID ...
+            #          → COALESCE(S.status, STATUS.status) AS STATUS
+            wf_cond  = f"AND s.WorkFlowID = {workflow_id}"  if workflow_id  is not None else ""
+            seq_cond = f"AND s.SequenceID = {sequence_id}"  if sequence_id is not None else ""
+            return self.spark.sql(f"""
+                SELECT
+                    COALESCE(
+                        CASE WHEN COALESCE(t.IsActive, FALSE) = TRUE THEN s.Status ELSE NULL END,
+                        'NULL'
+                    )                                            AS Status,
+                    COALESCE(s.ExecutionID,  '{execution_id}')  AS ExecutionID,
+                    COALESCE(s.ProjectCode,  '{project_code}')  AS ProjectCode,
+                    COALESCE(s.ProcessLoad,  '{process_load}')  AS ProcessLoad,
+                    s.WorkFlowID, s.SequenceID, s.TaskID,
+                    s.TaskName, s.SequenceCode, s.TaskMandatory, s.SourceSystemCode,
+                    s.SourceType, s.Attempts, s.StartTime,
+                    s.FullFileName, s.InFilePath, s.OutFilePath,
+                    p.ParameterType AS WatermarkType,
+                    {watermark_expr}
+                FROM (SELECT 1 AS _dummy) _base
+                LEFT JOIN {steps} s
+                  ON  s.ExecutionID    = '{execution_id}'
+                  AND s.ProcessingDate = '{processing_date}'
+                  AND s.ProjectCode    = '{project_code}'
+                  AND s.ProcessLoad    = '{process_load}'
+                  AND s.TaskID         = {task_id}
+                  AND s.Status        IN ('NQUE', 'RQUE', 'FAIL')
+                  {wf_cond} {seq_cond}
+                LEFT JOIN {tasks} t
+                  ON  t.TaskID      = s.TaskID
+                  AND t.WorkFlowID  = s.WorkFlowID
+                  AND t.SequenceID  = s.SequenceID
+                  AND COALESCE(t.ProjectCode, '') = COALESCE(s.ProjectCode, '')
+                  AND COALESCE(t.ProcessLoad, '') = COALESCE(s.ProcessLoad, '')
+                LEFT JOIN {params} p
+                  ON  COALESCE(p.ProjectCode,  '') = COALESCE(s.ProjectCode,    '')
+                  AND COALESCE(p.ProcessLoad,  '') = COALESCE(s.ProcessLoad,    '')
+                  AND COALESCE(p.ParameterName,'') = COALESCE(s.SourceSystemCode,'')
+            """)
+
+        # ── Orchestration mode ───────────────────────────────────────────────────
+        # Returns multiple rows: all non-DONE, IsActive=TRUE tasks.
         seq_filt = f"AND s.SequenceID = {sequence_id}" if sequence_id is not None else ""
-        wf_filt  = f"AND s.WorkFlowID = {workflow_id}" if workflow_id  is not None else ""
-
-        # Mirrors p_ETLProcessingSteps output (GenerateMode=0):
-        #   Status      — NQUE/RQUE/FAIL; callers skip execution if NULL/DONE
-        #   FullFileName — computed file name (e.g. payroll_uk_202604.csv); NULL for non-file tasks
-        #   InFilePath  — ADLS/storage base folder path; combine with FullFileName for full file URL
-        #   WatermarkType / WatermarkValue — joined from ETLconfigParameters on SourceSystemCode;
-        #     ADF reads WatermarkValue (as STRING) for @concat() source query parameterisation.
-        #     Equivalent to the #DELTAPARAMETER# resolved value in the original SQL Server framework.
-        tasks = self._fqn("ETLconfigTasks")
-
-        # Re-join ETLconfigTasks to filter out tasks deactivated after generate_execution_steps ran.
-        # Mirrors p_ETLProcessingSteps per-task IsActive re-check in the original SQL Server framework.
+        wf_filt  = f"AND s.WorkFlowID = {workflow_id}"  if workflow_id  is not None else ""
         return self.spark.sql(f"""
             SELECT
                 s.Status, s.ExecutionID, s.ProjectCode, s.ProcessLoad,
@@ -792,12 +853,7 @@ class ETLMonitorFramework:
                 s.SourceType, s.Attempts, s.StartTime,
                 s.FullFileName, s.InFilePath, s.OutFilePath,
                 p.ParameterType AS WatermarkType,
-                CASE p.ParameterType
-                    WHEN 'DELTA_DATE' THEN CAST(p.ValueDateTime AS STRING)
-                    WHEN 'DELTA_ID'   THEN CAST(p.ValueINT      AS STRING)
-                    WHEN 'FLAG'       THEN CAST(p.ValueBIT      AS STRING)
-                    ELSE NULL
-                END             AS WatermarkValue
+                {watermark_expr}
             FROM {steps} s
             JOIN {tasks} t
               ON  t.TaskID      = s.TaskID

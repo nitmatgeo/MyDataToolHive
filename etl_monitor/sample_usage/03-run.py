@@ -657,15 +657,16 @@ monitor.get_status(PROJECT_CODE, PROCESS_LOAD, execution_id=EXECUTION_ID_ADF).di
 # MAGIC ## Step 13 — Task Activation / Deactivation
 # MAGIC
 # MAGIC `get_pending_tasks()` re-joins `ETLconfigTasks` on every call.
-# MAGIC Setting `IsActive = FALSE` makes the task immediately absent from its output —
-# MAGIC even for an ExecutionID already generated.
+# MAGIC Setting `IsActive = FALSE` causes it to return `Status = 'NULL'` for that task —
+# MAGIC even for an ExecutionID already generated. This mirrors the original ADF
+# MAGIC `p_ETLProcessingSteps` proc pattern: one row always returned; `'NULL'` = skip.
 # MAGIC
 # MAGIC **Developer contract for every task cell:**
-# MAGIC 1. Call `get_pending_tasks()` — returns the task row if active, nothing if deactivated
-# MAGIC 2. Display the row (shows WorkFlowID, SequenceID, TaskID, Status etc.)
-# MAGIC 3. If row present → run the task; if absent → print deactivated, skip
+# MAGIC 1. Call `get_pending_tasks(..., workflow_id=N, sequence_id=N, task_id=N)` — always returns **one row**
+# MAGIC 2. Display the row (WorkFlowID, SequenceID, TaskID, Status)
+# MAGIC 3. Check `row["Status"] != 'NULL'` → run task; `'NULL'` → deactivated / DONE / not generated → skip
 # MAGIC
-# MAGIC Same pattern works at notebook level: check `pending.count() == 0` at the top
+# MAGIC Same pattern works at notebook level: check `row["Status"] == 'NULL'` at the top
 # MAGIC and call `dbutils.notebook.exit("deactivated")` to skip the whole notebook.
 
 # COMMAND ----------
@@ -693,21 +694,22 @@ print("✓ TaskID=4 deactivated in ETLconfigTasks")
 
 # COMMAND ----------
 
-# DBTITLE 1,Task cell — DEACTIVATED state (TaskID=4 absent from pending)
+# DBTITLE 1,Task cell — DEACTIVATED state (Status='NULL' returned for TaskID=4)
 # ── Step 1: read current state for this specific task ───────────────────────
-task_pending = monitor.get_pending_tasks(
-    EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT
-).filter("WorkFlowID = 1 AND SequenceID = 2 AND TaskID = 4")
+# Always returns exactly 1 row. Status='NULL' (string) means skip.
+task_row = monitor.get_pending_tasks(
+    EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT,
+    workflow_id=1, sequence_id=2, task_id=4
+)
+task_row.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
 
-print(f"ProjectCode : {PROJECT_CODE}")
-print(f"ProcessLoad : {PROCESS_LOAD}")
-print(f"ProcessingDate : {PROCESSING_DATE_DEACT}")
-print(f"Task (WF=1, Seq=2, TID=4) — rows returned: {task_pending.count()}")
-task_pending.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
+# ── Step 2: branch on Status ────────────────────────────────────────────────
+status = task_row.first()["Status"]
+print(f"ProjectCode : {PROJECT_CODE}  |  ProcessLoad : {PROCESS_LOAD}  |  ProcessingDate : {PROCESSING_DATE_DEACT}")
+print(f"Task (WF=1, Seq=2, TID=4) — Status: {status}")
 
-# ── Step 2: branch on presence ──────────────────────────────────────────────
-if task_pending.count() > 0:
-    print("→ Task is active — executing India Employee load")
+if status != 'NULL':
+    print(f"→ Status={status} — executing India Employee load")
     with monitor.task(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD,
                       task_id=4, workflow_id=1, sequence_id=2,
                       processing_date=PROCESSING_DATE_DEACT,
@@ -715,9 +717,8 @@ if task_pending.count() > 0:
         pass   # actual load logic here
     print("✓ TaskID=4 completed — status updated to DONE")
 else:
-    print("→ Task is DEACTIVATED (IsActive=FALSE) — no row returned — skipping")
-    print("  To reprocess: set IsActive=TRUE to re-activate")
-    print("  To replay a completed day: call monitor.status_reset() then re-activate")
+    print("→ Status='NULL' — task is DEACTIVATED (IsActive=FALSE) — skipping")
+    print("  To reprocess: set IsActive=TRUE in ETLconfigTasks, then re-run this cell")
 
 # COMMAND ----------
 
@@ -735,20 +736,20 @@ print("✓ TaskID=4 re-activated in ETLconfigTasks")
 
 # COMMAND ----------
 
-# DBTITLE 1,Same task cell — ACTIVE state (TaskID=4 now present in pending)
+# DBTITLE 1,Same task cell — ACTIVE state (Status='NQUE' returned for TaskID=4)
 # Identical code to the cell above — behaviour changes because IsActive is now TRUE.
-task_pending = monitor.get_pending_tasks(
-    EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT
-).filter("WorkFlowID = 1 AND SequenceID = 2 AND TaskID = 4")
+task_row = monitor.get_pending_tasks(
+    EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT,
+    workflow_id=1, sequence_id=2, task_id=4
+)
+task_row.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
 
-print(f"ProjectCode : {PROJECT_CODE}")
-print(f"ProcessLoad : {PROCESS_LOAD}")
-print(f"ProcessingDate : {PROCESSING_DATE_DEACT}")
-print(f"Task (WF=1, Seq=2, TID=4) — rows returned: {task_pending.count()}")
-task_pending.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
+status = task_row.first()["Status"]
+print(f"ProjectCode : {PROJECT_CODE}  |  ProcessLoad : {PROCESS_LOAD}  |  ProcessingDate : {PROCESSING_DATE_DEACT}")
+print(f"Task (WF=1, Seq=2, TID=4) — Status: {status}")
 
-if task_pending.count() > 0:
-    print("→ Task is active — executing India Employee load")
+if status != 'NULL':
+    print(f"→ Status={status} — executing India Employee load")
     with monitor.task(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD,
                       task_id=4, workflow_id=1, sequence_id=2,
                       processing_date=PROCESSING_DATE_DEACT,
@@ -756,8 +757,7 @@ if task_pending.count() > 0:
         pass
     print("✓ TaskID=4 completed — status updated to DONE")
 else:
-    print("→ Task is DEACTIVATED (IsActive=FALSE) — no row returned — skipping")
-    print("  To reprocess: set IsActive=TRUE to re-activate")
+    print("→ Status='NULL' — task is DEACTIVATED (IsActive=FALSE) — skipping")
 
 # COMMAND ----------
 

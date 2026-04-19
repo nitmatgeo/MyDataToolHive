@@ -38,8 +38,12 @@ ETLMonitorFramework(spark, catalog, schema="etl")
     └── register_task(...)             → INSERT/UPDATE MERGE into ETLconfigTasks
     └── register_parameter(...)        → INSERT/UPDATE MERGE into ETLconfigParameters
     └── generate_execution_steps(...)  → INSERT NQUE rows; Attempts-aware (see below)
-    └── get_pending_tasks(...)         → non-DONE + IsActive=TRUE tasks; re-joins ETLconfigTasks
-                                         so deactivated tasks disappear even if already generated
+    └── get_pending_tasks(...)         → two modes (mirrors original p_ETLProcessingSteps):
+                                         · Orchestration (no task_id): non-DONE + IsActive=TRUE tasks
+                                           re-joins ETLconfigTasks on every call
+                                         · Per-task worker (task_id supplied): always 1 row;
+                                           Status='NULL' (string) = deactivated / DONE / not generated → skip
+                                           Replicates FROM (SELECT 'NULL') LEFT JOIN … COALESCE pattern
     └── task(...)                      → context manager: NQUE → DONE/FAIL
                                          accepts log_message, log_type, log_code
     └── start_task / end_task / fail_task
@@ -293,8 +297,8 @@ histories do not interact.
 | Original stored procedure | Python method | Notes |
 |--------------------------|--------------|-------|
 | `p_ETLProcessingSteps` (GenerateMode=1) | `generate_execution_steps()` | First call: all tasks NQUE at Attempts=0. New ExecutionID same date: Attempts+1, skip DONE tasks. Same ExecutionID: no-op. **Period-aware NOT EXISTS:** D=same date, M=same YYYYMM (cross-date skip), Y=same YYYY. **FullFileName computed** by LoadFrequency at generate time. |
-| `p_ETLProcessingSteps` (GenerateMode=0, per-task output) | `get_pending_tasks()` | Returns non-DONE **and** `IsActive=TRUE` tasks (re-joins `ETLconfigTasks` — deactivated tasks disappear even if already generated). Includes `FullFileName`, `InFilePath`, `OutFilePath`, `WatermarkValue`, `WatermarkType`. **Developer contract:** call once at top of notebook; skip any task not present in the result. This replaces both `p_ETLProcessingSteps(GenerateMode=0)` per-task call and the ADF `IfCondition @not(equals(status,'NULL'))` gate — if a task is absent, it is inactive. |
-| `p_ETLOrchestrationSteps` | `get_pending_tasks()` | Returns non-DONE tasks; auto-generates on first call |
+| `p_ETLProcessingSteps` (GenerateMode=0, per-task) | `get_pending_tasks(..., task_id=N, workflow_id=N, sequence_id=N)` | **Always returns exactly 1 row.** `Status='NULL'` (string) = task is deactivated (`IsActive=FALSE`), already DONE, or not generated → skip. Any other status = task is runnable → execute. Replicates the original `FROM (SELECT 'NULL' AS STATUS) LEFT JOIN … COALESCE(S.status, STATUS.status)` pattern. Includes `FullFileName`, `InFilePath`, `OutFilePath`, `WatermarkValue`, `WatermarkType`. **Developer contract:** `if row["Status"] != 'NULL':` — replaces the ADF `IfCondition @not(equals(status,'NULL'))` gate. |
+| `p_ETLOrchestrationSteps` | `get_pending_tasks()` (no `task_id`) | Returns all non-DONE, `IsActive=TRUE` tasks. Re-joins `ETLconfigTasks` so deactivated tasks disappear even if already generated. Auto-generates steps on first call. Used by ADF ForEach and notebook batch loops. |
 | `p_ETLProcessingStatusUpdate` | `end_task()` / `fail_task()` | Status + timing write-back; DELTA_DATE auto-advance on DONE; LOAD_GO → NQUE on any FAIL |
 | `p_ETLProcessingStatusGet` | `get_status()` | Summary or task-level detail; `summary_mode=True` for rollup |
 | `p_ETLProcessingStatusReset` | `status_reset()` | DONE → RQUE for day replay; NOT for failure retry (use new ExecutionID for that) |
