@@ -66,6 +66,28 @@ from etl_monitor.seed_data import SEQUENCE_SEED
 logger = logging.getLogger(__name__)
 
 
+class _TaskGuard:
+    """Yielded by ``monitor.task()`` context manager.
+
+    ``active`` (bool) — True if the task is running and being tracked.
+    ``status`` (str)  — The actual status string: 'NQUE', 'RQUE', 'FAIL',
+                        or 'NULL' when the task is skipped.
+
+    Usage::
+
+        with monitor.task(...) as t:
+            if t.active:
+                actual_work()
+            else:
+                print(f"→ skipped ({t.status})")
+    """
+    __slots__ = ("active", "status")
+
+    def __init__(self, active: bool, status: str) -> None:
+        self.active = active
+        self.status = status
+
+
 class ETLMonitorFramework:
     """
     Centralised ETL process orchestration metadata registry and execution tracker.
@@ -665,12 +687,14 @@ class ETLMonitorFramework:
             INSERT INTO {steps}
             (ProcessingDate, ProjectCode, ProcessLoad, ExecutionID,
              WorkFlowID, SequenceID, TaskID, Attempts, Status,
+             ForceSkip,
              TaskName, SequenceCode, TaskMandatory, SourceSystemCode,
              FullFileName, InFilePath, OutFilePath,
              StartTime, LastUpdatedOn, LastUpdatedBy)
             SELECT
                 date('{processing_date}'), t.ProjectCode, t.ProcessLoad, '{execution_id}',
                 t.WorkFlowID, t.SequenceID, t.TaskID, {iteration}, 'NQUE',
+                FALSE,
                 t.TaskName, s.SequenceCode, t.TaskMandatory, t.SourceSystemCode,
                 CASE
                     WHEN t.FileNameMask IS NULL OR t.FileNameMask = '' THEN NULL
@@ -808,7 +832,9 @@ class ETLMonitorFramework:
             return self.spark.sql(f"""
                 SELECT
                     COALESCE(
-                        CASE WHEN COALESCE(t.IsActive, FALSE) = TRUE THEN s.Status ELSE NULL END,
+                        CASE WHEN COALESCE(t.IsActive, FALSE) = TRUE
+                                  AND COALESCE(s.ForceSkip, FALSE) = FALSE
+                             THEN s.Status ELSE NULL END,
                         'NULL'
                     )                                            AS Status,
                     COALESCE(s.ExecutionID,  '{execution_id}')  AS ExecutionID,
@@ -817,6 +843,7 @@ class ETLMonitorFramework:
                     s.WorkFlowID, s.SequenceID, s.TaskID,
                     s.TaskName, s.SequenceCode, s.TaskMandatory, s.SourceSystemCode,
                     s.SourceType, s.Attempts, s.StartTime,
+                    s.ForceSkip,
                     s.FullFileName, s.InFilePath, s.OutFilePath,
                     p.ParameterType AS WatermarkType,
                     {watermark_expr}
@@ -851,6 +878,7 @@ class ETLMonitorFramework:
                 s.WorkFlowID, s.SequenceID, s.TaskID,
                 s.TaskName, s.SequenceCode, s.TaskMandatory, s.SourceSystemCode,
                 s.SourceType, s.Attempts, s.StartTime,
+                s.ForceSkip,
                 s.FullFileName, s.InFilePath, s.OutFilePath,
                 p.ParameterType AS WatermarkType,
                 {watermark_expr}
@@ -871,6 +899,7 @@ class ETLMonitorFramework:
               AND s.ProjectCode    = '{project_code}'
               AND s.ProcessLoad    = '{process_load}'
               AND s.Status        != 'DONE'
+              AND COALESCE(s.ForceSkip, FALSE) = FALSE
               {seq_filt} {wf_filt}
             ORDER BY s.WorkFlowID, s.SequenceID, s.TaskID
         """)
@@ -1163,40 +1192,66 @@ class ETLMonitorFramework:
         log_code: Optional[str] = None,
     ):
         """
-        Context manager: start_task() at entry, end_task(DONE) on clean exit,
-        fail_task() on exception.
+        Self-guarding context manager: checks task status at entry, then
+        start_task() if active, end_task(DONE) on clean exit, fail_task() on exception.
+
+        Yields a ``_TaskGuard`` object ``t``:
+        - ``t.active`` (bool) — True if the task is running and being tracked
+        - ``t.status`` (str)  — 'NQUE', 'RQUE', 'FAIL', or 'NULL' (skip state)
+
+        **Skip conditions** — ``t.active=False, t.status='NULL'`` when:
+        - ``IsActive=FALSE`` in ETLconfigTasks (permanent config deactivation)
+        - ``ForceSkip=TRUE`` in ETLProcessingSteps (run-level exclusion via skip_task())
+        - Task already DONE for this execution
+        - Task not generated for this execution
+
+        Implicit guard (skip silently)::
+
+            with monitor.task(exec_id, PROJECT, PROCESS,
+                              task_id=4, workflow_id=1, sequence_id=2,
+                              processing_date=DATE) as t:
+                if t.active:
+                    actual_work()
+
+        Implicit guard with else::
+
+            with monitor.task(...) as t:
+                if t.active:
+                    actual_work()
+                else:
+                    print(f"→ skipped ({t.status})")
+
+        Explicit status check before the block::
+
+            status = monitor.task_status(exec_id, PROJECT, PROCESS, DATE,
+                                         workflow_id=1, sequence_id=2, task_id=4)
+            if status != 'NULL':
+                with monitor.task(...) as t:
+                    actual_work()
 
         ``log_message`` / ``log_type`` / ``log_code`` are written on DONE.
-        On exception, the exception string is captured as the error log_message automatically.
-
-        ``processing_date`` defaults to today's date when not supplied.
-
-        Attempts is always auto-detected from the NQUE/RQUE row for this ExecutionID so that
-        retry runs (new ExecutionID, Attempts > 0) are handled transparently without the caller
-        needing to track or pass the Attempts level.
-
-        Example::
-
-            exec_id = ETLMonitorFramework.generate_execution_id()
-            monitor.generate_execution_steps(exec_id, "CORP", "HR_DAILY", "2026-04-09")
-
-            with monitor.task(exec_id, "CORP", "HR_DAILY",
-                              task_id=1, sequence_id=2, workflow_id=1,
-                              log_message="Loaded 1,243 rows"):
-                # notebook logic here
-                pass
+        On exception, the exception string is captured automatically as error log_message.
+        ``processing_date`` defaults to today when not supplied.
         """
         from datetime import date as _date
         if processing_date is None:
             processing_date = str(_date.today())
 
-        # start_task auto-detects Attempts from the NQUE/RQUE row and returns the value used.
-        # end_task and fail_task must use the same Attempts to update the correct row.
+        # Self-guard: check runnable status before starting.
+        # Respects IsActive (ETLconfigTasks) and ForceSkip (ETLProcessingSteps).
+        current_status = self.task_status(
+            execution_id, project_code, process_load, processing_date,
+            workflow_id=workflow_id, sequence_id=sequence_id, task_id=task_id,
+        )
+        if current_status == 'NULL':
+            yield _TaskGuard(active=False, status='NULL')
+            return
+
         actual_attempts = self.start_task(execution_id, project_code, process_load,
                                           task_id, sequence_id, workflow_id,
                                           processing_date, None, source_type)
         try:
-            yield
+            yield _TaskGuard(active=True, status=current_status)
             self.end_task(execution_id, project_code, process_load,
                           task_id, sequence_id, workflow_id,
                           processing_date, actual_attempts, status="DONE",
@@ -1206,6 +1261,124 @@ class ETLMonitorFramework:
                            task_id, sequence_id, workflow_id,
                            processing_date, actual_attempts, log_message=str(exc))
             raise
+
+    def task_status(
+        self,
+        execution_id: str,
+        project_code: str,
+        process_load: str,
+        processing_date: Optional[str] = None,
+        workflow_id: Optional[int] = None,
+        sequence_id: Optional[int] = None,
+        task_id: Optional[int] = None,
+    ) -> str:
+        """
+        Return the runnable status for a specific task in this execution.
+
+        Returns one of: ``'NQUE'``, ``'RQUE'``, ``'FAIL'``, or ``'NULL'``.
+
+        ``'NULL'`` (string) means skip — task is deactivated (``IsActive=FALSE``),
+        force-skipped (``ForceSkip=TRUE``), already DONE, or not generated.
+
+        Thin wrapper around ``get_pending_tasks(task_id=N)`` for explicit guard patterns::
+
+            status = monitor.task_status(exec_id, PROJECT, PROCESS, DATE,
+                                         workflow_id=1, sequence_id=2, task_id=4)
+            if status != 'NULL':
+                with monitor.task(...) as t:
+                    actual_work()
+            else:
+                print(f"→ skipping — {status}")
+        """
+        from datetime import date as _date
+        if processing_date is None:
+            processing_date = str(_date.today())
+        row = self.get_pending_tasks(
+            execution_id, project_code, process_load, processing_date,
+            workflow_id=workflow_id, sequence_id=sequence_id, task_id=task_id,
+        ).first()
+        return row["Status"] if row else 'NULL'
+
+    def skip_task(
+        self,
+        execution_id: str,
+        project_code: str,
+        process_load: str,
+        task_id: int,
+        workflow_id: int,
+        sequence_id: int,
+        processing_date: Optional[str] = None,
+    ) -> None:
+        """
+        Set ``ForceSkip=TRUE`` for this task in this specific run.
+
+        The task returns ``Status='NULL'`` from ``get_pending_tasks()`` and is
+        skipped by the self-guarding ``task()`` context manager for this run only.
+
+        Does NOT touch ``ETLconfigTasks.IsActive`` — the task remains active for
+        future runs.  For permanent deactivation use ``register_task(is_active=False)``.
+
+        ForceSkip does NOT carry forward on retry (new ExecutionID) — each new
+        execution generates fresh rows with ``ForceSkip=FALSE``.
+        ``status_reset()`` also clears ``ForceSkip`` back to ``FALSE`` for day replay.
+        """
+        from datetime import date as _date
+        if processing_date is None:
+            processing_date = str(_date.today())
+        steps = self._fqn("ETLProcessingSteps")
+        self.spark.sql(f"""
+            UPDATE {steps}
+            SET    ForceSkip     = TRUE,
+                   LastUpdatedOn = current_timestamp()
+            WHERE  ExecutionID    = '{execution_id}'
+              AND  ProcessingDate = '{processing_date}'
+              AND  ProjectCode    = '{project_code}'
+              AND  ProcessLoad    = '{process_load}'
+              AND  WorkFlowID     = {workflow_id}
+              AND  SequenceID     = {sequence_id}
+              AND  TaskID         = {task_id}
+        """)
+        logger.info("ForceSkip=TRUE set for task %s wf=%s seq=%s exec=%s",
+                    task_id, workflow_id, sequence_id, execution_id)
+
+    def unskip_task(
+        self,
+        execution_id: str,
+        project_code: str,
+        process_load: str,
+        task_id: int,
+        workflow_id: int,
+        sequence_id: int,
+        processing_date: Optional[str] = None,
+    ) -> None:
+        """
+        Clear ``ForceSkip`` back to ``FALSE`` — re-enables this task for this run.
+
+        The task returns its real status from ``get_pending_tasks()`` on the next call.
+        Useful when a task was skipped mid-run but a dependency was then resolved.
+
+        For the next retry (new ExecutionID), ``ForceSkip`` is always ``FALSE`` by
+        default on new NQUE rows — ``unskip_task()`` is only needed within the same
+        execution.
+        """
+        from datetime import date as _date
+        if processing_date is None:
+            processing_date = str(_date.today())
+        steps = self._fqn("ETLProcessingSteps")
+        self.spark.sql(f"""
+            UPDATE {steps}
+            SET    ForceSkip     = FALSE,
+                   LastUpdatedOn = current_timestamp()
+            WHERE  ExecutionID    = '{execution_id}'
+              AND  ProcessingDate = '{processing_date}'
+              AND  ProjectCode    = '{project_code}'
+              AND  ProcessLoad    = '{process_load}'
+              AND  WorkFlowID     = {workflow_id}
+              AND  SequenceID     = {sequence_id}
+              AND  TaskID         = {task_id}
+        """)
+        logger.info("ForceSkip cleared (FALSE) for task %s wf=%s seq=%s exec=%s",
+                    task_id, workflow_id, sequence_id, execution_id)
 
     # ------------------------------------------------------------------
     # Public — watermark helpers
@@ -1423,11 +1596,22 @@ class ETLMonitorFramework:
 
         if not execution_id and attempts is None:
             # ── Full day replay ─────────────────────────────────────────────
-            # Reset all DONE tasks for this date back to RQUE.
+            # Reset all DONE tasks → RQUE and clear all ForceSkip flags.
+            # ForceSkip is a one-time run-level decision; day replay = clean slate.
             self.spark.sql(f"""
                 UPDATE {steps}
-                SET Status='RQUE', LogMessage={remark_sql}, LastUpdatedOn=current_timestamp()
+                SET Status='RQUE', ForceSkip=FALSE,
+                    LogMessage={remark_sql}, LastUpdatedOn=current_timestamp()
                 WHERE Status='DONE'
+                  AND ProcessingDate='{processing_date}'
+                  AND ProjectCode='{project_code}'
+                  AND ProcessLoad='{process_load}'
+            """)
+            # Also clear ForceSkip on any NQUE/FAIL rows that were skipped but never ran
+            self.spark.sql(f"""
+                UPDATE {steps}
+                SET ForceSkip=FALSE, LastUpdatedOn=current_timestamp()
+                WHERE ForceSkip=TRUE
                   AND ProcessingDate='{processing_date}'
                   AND ProjectCode='{project_code}'
                   AND ProcessLoad='{process_load}'
@@ -1449,11 +1633,23 @@ class ETLMonitorFramework:
             tsk_filt  = f"AND TaskID={task_id}"         if task_id      is not None else ""
             exec_filt = f"AND ExecutionID='{execution_id}'" if execution_id else ""
 
-            # Reset DONE tasks → RQUE (for replay)
+            # Reset DONE tasks → RQUE and clear ForceSkip flags in scope
             self.spark.sql(f"""
                 UPDATE {steps}
-                SET Status='RQUE', LogMessage={remark_sql}, LastUpdatedOn=current_timestamp()
+                SET Status='RQUE', ForceSkip=FALSE,
+                    LogMessage={remark_sql}, LastUpdatedOn=current_timestamp()
                 WHERE Status='DONE'
+                  AND ProcessingDate='{processing_date}'
+                  AND ProjectCode='{project_code}'
+                  AND ProcessLoad='{process_load}'
+                  AND Attempts<={resolved}
+                  {exec_filt} {wf_filt} {seq_filt} {tsk_filt}
+            """)
+            # Clear ForceSkip on any NQUE/FAIL rows that were skipped in scope
+            self.spark.sql(f"""
+                UPDATE {steps}
+                SET ForceSkip=FALSE, LastUpdatedOn=current_timestamp()
+                WHERE ForceSkip=TRUE
                   AND ProcessingDate='{processing_date}'
                   AND ProjectCode='{project_code}'
                   AND ProcessLoad='{process_load}'
@@ -1779,6 +1975,19 @@ OTHER METHODS
                 else "[RESULTS]"
             )
             logger.info("Table ready: %s  %s", fqn, cls)
+
+        # Migration — add ForceSkip to ETLProcessingSteps for existing deployments.
+        # CREATE TABLE IF NOT EXISTS skips the DDL when the table already exists,
+        # so existing tables need an explicit ALTER TABLE to pick up new columns.
+        steps_fqn = self._fqn("ETLProcessingSteps")
+        try:
+            self.spark.sql(f"""
+                ALTER TABLE {steps_fqn}
+                ADD COLUMN IF NOT EXISTS ForceSkip BOOLEAN
+                COMMENT 'Run-level skip flag — see DDL for full description'
+            """)
+        except Exception:
+            pass  # table does not exist yet — CREATE TABLE above already included the column
 
     def _create_reporting_views(self) -> None:
         """Create or replace all 6 monitoring views."""

@@ -324,6 +324,7 @@ DDL_STATEMENTS: dict[str, str] = {
             FullFileName     STRING     COMMENT 'Computed at generate_execution_steps() — FileNameMask + date suffix by LoadFrequency (D→_yyyyMMdd, M→_yyyyMM, Y→_yyyy) + FileExtension. NULL for non-file tasks. Mirrors FullFileName from original SQL Server framework.',
             InFilePath       STRING     COMMENT 'Snapshot of ETLconfigTasks.InFilePath — ADLS/storage base folder path for input files. NULL for non-file tasks.',
             OutFilePath      STRING     COMMENT 'Snapshot of ETLconfigTasks.OutFilePath — ADLS/storage output path. NULL if not applicable.',
+            ForceSkip        BOOLEAN    COMMENT 'Run-level skip flag — TRUE = skip this task for this specific run without deactivating the task config. Default FALSE. Cleared by status_reset(). Does not carry forward to retry runs (new ExecutionID). Use IsActive in ETLconfigTasks for permanent deactivation.',
             StartTime        TIMESTAMP  COMMENT 'When this task began executing',
             EndTime          TIMESTAMP  COMMENT 'When this task finished (NULL while running)',
             DurationSeconds  INT        COMMENT 'DATEDIFF(SECOND, StartTime, EndTime)',

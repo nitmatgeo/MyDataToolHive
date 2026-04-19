@@ -654,20 +654,26 @@ monitor.get_status(PROJECT_CODE, PROCESS_LOAD, execution_id=EXECUTION_ID_ADF).di
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 13 — Task Activation / Deactivation
+# MAGIC ## Step 13 — Task Exclusion: IsActive (permanent) vs ForceSkip (run-level)
 # MAGIC
-# MAGIC `get_pending_tasks()` re-joins `ETLconfigTasks` on every call.
-# MAGIC Setting `IsActive = FALSE` causes it to return `Status = 'NULL'` for that task —
-# MAGIC even for an ExecutionID already generated. This mirrors the original ADF
-# MAGIC `p_ETLProcessingSteps` proc pattern: one row always returned; `'NULL'` = skip.
+# MAGIC Two mechanisms for skipping tasks — use the right one for the scope of the decision:
 # MAGIC
-# MAGIC **Developer contract for every task cell:**
-# MAGIC 1. Call `get_pending_tasks(..., workflow_id=N, sequence_id=N, task_id=N)` — always returns **one row**
-# MAGIC 2. Display the row (WorkFlowID, SequenceID, TaskID, Status)
-# MAGIC 3. Check `row["Status"] != 'NULL'` → run task; `'NULL'` → deactivated / DONE / not generated → skip
+# MAGIC | | `ETLconfigTasks.IsActive` | `ETLProcessingSteps.ForceSkip` |
+# MAGIC |---|---|---|
+# MAGIC | Scope | **Permanent** — all future runs | **One run only** — this ExecutionID |
+# MAGIC | Carries to retry? | Yes — config persists | No — new NQUE row = FALSE |
+# MAGIC | Cleared by `status_reset()`? | No | **Yes** — replay = clean slate |
+# MAGIC | Use case | Task retired / under maintenance | Upstream dep not ready for this run |
 # MAGIC
-# MAGIC Same pattern works at notebook level: check `row["Status"] == 'NULL'` at the top
-# MAGIC and call `dbutils.notebook.exit("deactivated")` to skip the whole notebook.
+# MAGIC **Developer contract — same pattern for both mechanisms:**
+# MAGIC ```python
+# MAGIC with monitor.task(...) as t:
+# MAGIC     if t.active:      # True → task is NQUE/RQUE/FAIL and not skipped
+# MAGIC         actual_work()
+# MAGIC     else:             # False → IsActive=FALSE or ForceSkip=TRUE or DONE or not generated
+# MAGIC         print(f"→ skipped ({t.status})")
+# MAGIC ```
+# MAGIC `task()` is self-guarding — checks status at entry, no start/end DB writes if skipped.
 
 # COMMAND ----------
 
@@ -694,31 +700,19 @@ print("✓ TaskID=4 deactivated in ETLconfigTasks")
 
 # COMMAND ----------
 
-# DBTITLE 1,Task cell — DEACTIVATED state (Status='NULL' returned for TaskID=4)
-# ── Step 1: read current state for this specific task ───────────────────────
-# Always returns exactly 1 row. Status='NULL' (string) means skip.
-task_row = monitor.get_pending_tasks(
-    EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT,
-    workflow_id=1, sequence_id=2, task_id=4
-)
-task_row.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
-
-# ── Step 2: branch on Status ────────────────────────────────────────────────
-status = task_row.first()["Status"]
-print(f"ProjectCode : {PROJECT_CODE}  |  ProcessLoad : {PROCESS_LOAD}  |  ProcessingDate : {PROCESSING_DATE_DEACT}")
-print(f"Task (WF=1, Seq=2, TID=4) — Status: {status}")
-
-if status != 'NULL':
-    print(f"→ Status={status} — executing India Employee load")
-    with monitor.task(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD,
-                      task_id=4, workflow_id=1, sequence_id=2,
-                      processing_date=PROCESSING_DATE_DEACT,
-                      log_message="India employees loaded from PeopleSoft: 1,107 records"):
+# DBTITLE 1,Task cell — DEACTIVATED state (IsActive=FALSE → t.active=False)
+with monitor.task(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD,
+                  task_id=4, workflow_id=1, sequence_id=2,
+                  processing_date=PROCESSING_DATE_DEACT,
+                  log_message="India employees loaded from PeopleSoft: 1,107 records") as t:
+    print(f"Task (WF=1, Seq=2, TID=4) — active={t.active}  status={t.status}")
+    if t.active:
+        print(f"→ executing India Employee load")
         pass   # actual load logic here
-    print("✓ TaskID=4 completed — status updated to DONE")
-else:
-    print("→ Status='NULL' — task is DEACTIVATED (IsActive=FALSE) — skipping")
-    print("  To reprocess: set IsActive=TRUE in ETLconfigTasks, then re-run this cell")
+        print("✓ TaskID=4 completed")
+    else:
+        print("→ DEACTIVATED (IsActive=FALSE) — skipping")
+        print("  To reprocess: set IsActive=TRUE in ETLconfigTasks, then re-run")
 
 # COMMAND ----------
 
@@ -736,28 +730,90 @@ print("✓ TaskID=4 re-activated in ETLconfigTasks")
 
 # COMMAND ----------
 
-# DBTITLE 1,Same task cell — ACTIVE state (Status='NQUE' returned for TaskID=4)
-# Identical code to the cell above — behaviour changes because IsActive is now TRUE.
-task_row = monitor.get_pending_tasks(
-    EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_DEACT,
-    workflow_id=1, sequence_id=2, task_id=4
-)
-task_row.select("WorkFlowID", "SequenceID", "TaskID", "TaskName", "Status").display()
+# DBTITLE 1,Same task cell — ACTIVE state (IsActive=TRUE → t.active=True)
+# Identical code — behaviour changes because IsActive is now TRUE.
+with monitor.task(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD,
+                  task_id=4, workflow_id=1, sequence_id=2,
+                  processing_date=PROCESSING_DATE_DEACT,
+                  log_message="India employees loaded from PeopleSoft: 1,107 records") as t:
+    print(f"Task (WF=1, Seq=2, TID=4) — active={t.active}  status={t.status}")
+    if t.active:
+        print(f"→ Status={t.status} — executing India Employee load")
+        pass   # actual load logic here
+        print("✓ TaskID=4 completed")
+    else:
+        print("→ skipped — unexpected")
 
-status = task_row.first()["Status"]
-print(f"ProjectCode : {PROJECT_CODE}  |  ProcessLoad : {PROCESS_LOAD}  |  ProcessingDate : {PROCESSING_DATE_DEACT}")
-print(f"Task (WF=1, Seq=2, TID=4) — Status: {status}")
+# COMMAND ----------
 
-if status != 'NULL':
-    print(f"→ Status={status} — executing India Employee load")
-    with monitor.task(EXECUTION_ID_DEACT, PROJECT_CODE, PROCESS_LOAD,
-                      task_id=4, workflow_id=1, sequence_id=2,
-                      processing_date=PROCESSING_DATE_DEACT,
-                      log_message="India employees loaded from PeopleSoft: 1,107 records"):
-        pass
-    print("✓ TaskID=4 completed — status updated to DONE")
-else:
-    print("→ Status='NULL' — task is DEACTIVATED (IsActive=FALSE) — skipping")
+# MAGIC %md
+# MAGIC ### Step 13b — ForceSkip: run-level exclusion without touching config
+# MAGIC
+# MAGIC `ForceSkip` excludes a task from **one specific run** (this ExecutionID only).
+# MAGIC `ETLconfigTasks.IsActive` stays `TRUE` — the task remains active for all future runs.
+# MAGIC
+# MAGIC **When to use:** upstream dependency not ready, data quality gate failed, manual
+# MAGIC intervention needed for just this run — but you don't want to permanently retire the task.
+# MAGIC
+# MAGIC **Lifecycle:**
+# MAGIC - New ExecutionID (retry) → fresh NQUE rows with `ForceSkip=FALSE` — task runs again
+# MAGIC - `status_reset()` → clears `ForceSkip=FALSE` on all rows in scope (day replay = clean slate)
+
+# COMMAND ----------
+
+# DBTITLE 1,Setup — fresh run for ForceSkip demo (IsActive=TRUE for all tasks)
+PROCESSING_DATE_FSKIP = "2026-01-14"
+EXECUTION_ID_FSKIP    = ETLMonitorFramework.generate_execution_id()
+
+monitor.generate_execution_steps(EXECUTION_ID_FSKIP, PROJECT_CODE, PROCESS_LOAD, PROCESSING_DATE_FSKIP)
+print(f"✓ {PROCESSING_DATE_FSKIP} — 9 tasks NQUE, all ForceSkip=FALSE")
+
+# COMMAND ----------
+
+# DBTITLE 1,ForceSkip TaskID=4 for this run only
+monitor.skip_task(EXECUTION_ID_FSKIP, PROJECT_CODE, PROCESS_LOAD,
+                  task_id=4, workflow_id=1, sequence_id=2,
+                  processing_date=PROCESSING_DATE_FSKIP)
+print("✓ ForceSkip=TRUE set for TaskID=4 — config (IsActive) unchanged")
+
+# COMMAND ----------
+
+# DBTITLE 1,Task cell — ForceSkip=TRUE → t.active=False (same pattern as IsActive)
+with monitor.task(EXECUTION_ID_FSKIP, PROJECT_CODE, PROCESS_LOAD,
+                  task_id=4, workflow_id=1, sequence_id=2,
+                  processing_date=PROCESSING_DATE_FSKIP,
+                  log_message="India employees loaded from PeopleSoft: 1,107 records") as t:
+    print(f"Task (WF=1, Seq=2, TID=4) — active={t.active}  status={t.status}")
+    if t.active:
+        print(f"→ Status={t.status} — executing India Employee load")
+        pass   # actual load logic here
+    else:
+        print("→ ForceSkip=TRUE — excluded from this run only — skipping")
+        print("  Next retry (new ExecutionID) will generate a fresh NQUE row with ForceSkip=FALSE")
+
+# COMMAND ----------
+
+# DBTITLE 1,Unskip mid-run (dependency resolved) and re-run cell
+monitor.unskip_task(EXECUTION_ID_FSKIP, PROJECT_CODE, PROCESS_LOAD,
+                    task_id=4, workflow_id=1, sequence_id=2,
+                    processing_date=PROCESSING_DATE_FSKIP)
+print("✓ ForceSkip cleared — TaskID=4 re-enabled for this run")
+
+# COMMAND ----------
+
+# DBTITLE 1,Same task cell — ForceSkip cleared → t.active=True
+# Identical code — behaviour changes because ForceSkip is now FALSE.
+with monitor.task(EXECUTION_ID_FSKIP, PROJECT_CODE, PROCESS_LOAD,
+                  task_id=4, workflow_id=1, sequence_id=2,
+                  processing_date=PROCESSING_DATE_FSKIP,
+                  log_message="India employees loaded from PeopleSoft: 1,107 records") as t:
+    print(f"Task (WF=1, Seq=2, TID=4) — active={t.active}  status={t.status}")
+    if t.active:
+        print(f"→ Status={t.status} — executing India Employee load")
+        pass   # actual load logic here
+        print("✓ TaskID=4 completed — DONE")
+    else:
+        print("→ skipped — unexpected")
 
 # COMMAND ----------
 

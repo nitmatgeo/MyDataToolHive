@@ -39,13 +39,18 @@ ETLMonitorFramework(spark, catalog, schema="etl")
     └── register_parameter(...)        → INSERT/UPDATE MERGE into ETLconfigParameters
     └── generate_execution_steps(...)  → INSERT NQUE rows; Attempts-aware (see below)
     └── get_pending_tasks(...)         → two modes (mirrors original p_ETLProcessingSteps):
-                                         · Orchestration (no task_id): non-DONE + IsActive=TRUE tasks
-                                           re-joins ETLconfigTasks on every call
+                                         · Orchestration (no task_id): non-DONE + IsActive=TRUE
+                                           + ForceSkip=FALSE tasks; re-joins ETLconfigTasks each call
                                          · Per-task worker (task_id supplied): always 1 row;
-                                           Status='NULL' (string) = deactivated / DONE / not generated → skip
+                                           Status='NULL' (string) = deactivated / ForceSkip / DONE / not generated
                                            Replicates FROM (SELECT 'NULL') LEFT JOIN … COALESCE pattern
-    └── task(...)                      → context manager: NQUE → DONE/FAIL
+    └── task(...)                      → self-guarding context manager: checks status at entry,
+                                         NQUE → DONE/FAIL; yields _TaskGuard(active, status)
+                                         if t.active=False → body executes but no DB writes
                                          accepts log_message, log_type, log_code
+    └── task_status(...)               → returns 'NQUE'/'RQUE'/'FAIL'/'NULL' for explicit guards
+    └── skip_task(...)                 → sets ForceSkip=TRUE for this task in this run only
+    └── unskip_task(...)               → clears ForceSkip back to FALSE within same execution
     └── start_task / end_task / fail_task
     └── advance_watermark(...)         → manual DELTA_ID advance (KNOWN LIMITATION)
     └── get_active_watermark(...)      → returns typed watermark value
@@ -145,6 +150,42 @@ Run 2 (new ExecutionID, same date):
 Day replay — `status_reset()` resets DONE → RQUE to re-process a date that already completed:
 ```
 DONE → [status_reset()] → RQUE → DONE
+```
+
+---
+
+## Task exclusion — IsActive vs ForceSkip
+
+Two mechanisms exist for skipping tasks. Use the right one for the scope of the decision.
+
+| | `ETLconfigTasks.IsActive` | `ETLProcessingSteps.ForceSkip` |
+|---|---|---|
+| Scope | **Permanent** — all future runs, all executions | **One run only** — this ExecutionID only |
+| Carries forward to retry? | Yes — config change persists | No — new ExecutionID generates `FALSE` |
+| Cleared by `status_reset()`? | No — config unchanged | **Yes** — day replay = clean slate |
+| Effect on `get_pending_tasks()` | Task absent from orchestration mode; `Status='NULL'` in per-task mode | Same as IsActive |
+| Effect on `task()` | `t.active=False`, no DB writes | Same as IsActive |
+| Use case | Task retired, under maintenance, or permanently disabled | Exclude one task from this specific run (e.g. upstream dependency not ready) |
+| How to set | `register_task(is_active=False)` or direct UPDATE | `monitor.skip_task(exec_id, ...)` |
+| How to clear | `register_task(is_active=True)` | `monitor.unskip_task(exec_id, ...)` or next retry |
+
+**Developer contract for task cells (both mechanisms respected automatically):**
+```python
+# Implicit — guard inside the with block:
+with monitor.task(exec_id, PROJECT, PROCESS,
+                  task_id=4, workflow_id=1, sequence_id=2,
+                  processing_date=DATE) as t:
+    if t.active:
+        actual_work()   # only runs when NQUE/RQUE/FAIL and not skipped
+    else:
+        print(f"→ skipped ({t.status})")   # optional else branch
+
+# Explicit — check before the block:
+status = monitor.task_status(exec_id, PROJECT, PROCESS, DATE,
+                              workflow_id=1, sequence_id=2, task_id=4)
+if status != 'NULL':
+    with monitor.task(...) as t:
+        actual_work()
 ```
 
 ---
@@ -300,6 +341,10 @@ histories do not interact.
 | `p_ETLProcessingSteps` (GenerateMode=0, per-task) | `get_pending_tasks(..., task_id=N, workflow_id=N, sequence_id=N)` | **Always returns exactly 1 row.** `Status='NULL'` (string) = task is deactivated (`IsActive=FALSE`), already DONE, or not generated → skip. Any other status = task is runnable → execute. Replicates the original `FROM (SELECT 'NULL' AS STATUS) LEFT JOIN … COALESCE(S.status, STATUS.status)` pattern. Includes `FullFileName`, `InFilePath`, `OutFilePath`, `WatermarkValue`, `WatermarkType`. **Developer contract:** `if row["Status"] != 'NULL':` — replaces the ADF `IfCondition @not(equals(status,'NULL'))` gate. |
 | `p_ETLOrchestrationSteps` | `get_pending_tasks()` (no `task_id`) | Returns all non-DONE, `IsActive=TRUE` tasks. Re-joins `ETLconfigTasks` so deactivated tasks disappear even if already generated. Auto-generates steps on first call. Used by ADF ForEach and notebook batch loops. |
 | `p_ETLProcessingStatusUpdate` | `end_task()` / `fail_task()` | Status + timing write-back; DELTA_DATE auto-advance on DONE; LOAD_GO → NQUE on any FAIL |
+| *(new — no SQL equivalent)* | `task()` context manager | Self-guarding: checks status at entry; yields `_TaskGuard(active, status)`. Use `if t.active:` to gate work. `IsActive=FALSE` or `ForceSkip=TRUE` → `t.active=False`, no DB writes. |
+| *(new — no SQL equivalent)* | `task_status()` | Returns `'NQUE'/'RQUE'/'FAIL'/'NULL'` for explicit pre-check before `task()`. |
+| *(new — no SQL equivalent)* | `skip_task()` | Sets `ForceSkip=TRUE` in ETLProcessingSteps for this task/run. Run-level exclusion — does not touch ETLconfigTasks. Not carried to retry runs. |
+| *(new — no SQL equivalent)* | `unskip_task()` | Clears `ForceSkip=FALSE` within the same execution (mid-run re-enable). |
 | `p_ETLProcessingStatusGet` | `get_status()` | Summary or task-level detail; `summary_mode=True` for rollup |
 | `p_ETLProcessingStatusReset` | `status_reset()` | DONE → RQUE for day replay; NOT for failure retry (use new ExecutionID for that) |
 | `p_ETLconfigProcessingMode` | `set_processing_mode()` | Historic mode, live mode, bulk mode, specific param |
