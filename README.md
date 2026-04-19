@@ -247,7 +247,7 @@ Run `framework.sample_usage(spark)` to extract these into your Databricks Worksp
 
 ## Status
 
-Pre-release alpha (`0.1.0a1`). API may change before `1.0.0`.
+Pre-release alpha (`0.1.0ax`). API may change before `1.0.0`.
 
 ---
 
