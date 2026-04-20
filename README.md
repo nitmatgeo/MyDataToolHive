@@ -67,8 +67,10 @@ monitor.generate_execution_steps(exec_id, "CORP", "HR_DAILY", "2026-04-09")
 
 with monitor.task(exec_id, "CORP", "HR_DAILY",
                   task_id=1, workflow_id=1, sequence_id=2,
-                  processing_date="2026-04-09"):
-    pass   # your notebook logic here
+                  processing_date="2026-04-09") as t:
+    if t.active:
+        pass   # your notebook logic here
+    # t.active=False when task is deactivated, force-skipped, already DONE, or not generated
 ```
 
 ---
@@ -248,10 +250,13 @@ ADF Copy Activity source query expression:
 ADF calls a Databricks Notebook activity passing widget parameters.
 Three lightweight utility notebooks are created per project (not shipped with this package):
 
-- `etl_start_task.py` — receives `execution_id`, `project_code`, `process_load`, `task_id`,
-  `workflow_id`, `sequence_id`, `processing_date`, `source_type` as widgets → calls `monitor.start_task(...)`.
-- `etl_end_task.py` — same widgets + `log_message`, `log_type` → calls `monitor.end_task(...)`.
-- `etl_fail_task.py` — same widgets + error details → calls `monitor.fail_task(...)`.
+All three share the same widget set:
+`execution_id`, `project_code`, `process_load`, `task_id`, `workflow_id`, `sequence_id`,
+`processing_date`, `source_type`, `log_message`, `log_type`, `log_code`, `timestamp`
+
+- `etl_start_task.py` → calls `monitor.start_task(...)`. `timestamp` overrides the recorded start time (pass ADF activity start time when it differs from notebook execution time).
+- `etl_end_task.py` → calls `monitor.end_task(...)`. `DurationSeconds` computed from `StartTime` to `timestamp`.
+- `etl_fail_task.py` → calls `monitor.fail_task(...)`. `log_message` carries the ADF error output.
 
 ### ForEach over pending tasks
 
@@ -261,18 +266,19 @@ After each SequenceID stage completes, ADF checks `v_mandatoryBlockers` before a
 
 ---
 
-## Stored Procedure Equivalence
+## API Reference
 
-For teams migrating from the SQL Server / ADF version:
-
-| Original stored procedure | Python method | Notes |
-|--------------------------|--------------|-------|
-| `p_ETLProcessingSteps` (GenerateMode=1) | `generate_execution_steps()` | INSERT NQUE rows for all active tasks |
-| `p_ETLOrchestrationSteps` | `get_pending_tasks()` | Returns non-DONE tasks; auto-generates on first call |
-| `p_ETLProcessingStatusUpdate` | `end_task()` / `fail_task()` | Status + timing write-back; `DELTA_DATE` auto-advance on DONE |
-| `p_ETLProcessingStatusGet` | `get_status()` | Summary or task-level detail; `summary_mode=True` for rollup |
-| `p_ETLProcessingStatusReset` | `status_reset()` | Bulk or specific task reset; always resets initiation row |
-| `p_ETLconfigProcessingMode` | `set_processing_mode()` | Historic mode, live mode, bulk mode, specific param |
+| Method | Notes |
+|--------|-------|
+| `generate_execution_steps()` | INSERT NQUE rows; Attempts-aware; period-aware skip for M/Y tasks |
+| `get_pending_tasks(..., task_id=N, workflow_id=N, sequence_id=N)` | Always 1 row; `Status='NULL'` = skip |
+| `get_pending_tasks()` (no `task_id`) | Non-DONE + `IsActive=TRUE` + `ForceSkip=FALSE` tasks; auto-generates on first call |
+| `end_task()` / `fail_task()` | Status + timing write-back; `DELTA_DATE` auto-advance on DONE; `Attempts` auto-detected |
+| `get_status()` | Summary or task-level detail; `summary_mode=True` for rollup |
+| `status_reset()` | Day replay only (DONE → RQUE); also clears `ForceSkip`. **Not** for failure retry — use a new ExecutionID |
+| `set_processing_mode()` | Historic mode, live mode, bulk mode, specific param |
+| `task_status()` | Returns `'NQUE'`/`'RQUE'`/`'FAIL'`/`'NULL'` — explicit pre-check without entering `task()` |
+| `skip_task()` / `unskip_task()` | Run-level `ForceSkip` flag — excludes one task from one run without touching config |
 
 ---
 
@@ -287,43 +293,126 @@ monitor.set_processing_mode("CORP", "HR_DAILY")                             # re
 
 ---
 
-## Status and Retry
+## Status, Retry and Day Replay
 
 ```python
 # Check status
 monitor.get_status("CORP", "HR_DAILY", execution_id=exec_id)           # task detail
 monitor.get_status("CORP", "HR_DAILY", summary_mode=True)              # run rollup
 
-# Reset failures for retry
-monitor.status_reset("CORP", "HR_DAILY", execution_id=exec_id)         # all failures in run
+# Failure retry — use a NEW ExecutionID (mirrors ADF re-trigger with a new RunID)
+# generate_execution_steps() auto-increments Attempts, skips DONE tasks, re-inserts FAIL/NQUE only
+exec_id_2 = ETLMonitorFramework.generate_execution_id()
+monitor.generate_execution_steps(exec_id_2, "CORP", "HR_DAILY", "2026-04-09")
+
+# Day replay — reset an already-completed date back to RQUE (NOT for failure retry)
+# Also clears any ForceSkip flags so all tasks run cleanly on replay
+monitor.status_reset("CORP", "HR_DAILY", processing_date="2026-04-09")  # full date
 monitor.status_reset("CORP", "HR_DAILY", execution_id=exec_id,
-                     task_id=1, workflow_id=1)                          # specific task only
+                     task_id=1, workflow_id=1)                           # specific task
 ```
 
 ---
 
-## Recommended Implementation Order
+## Task Exclusion — IsActive vs ForceSkip
 
-1. **Deploy** — run `monitor.setup()` in a Databricks notebook (idempotent, creates everything).
-2. **Register processes** — `register_process()` for each domain (HR_DAILY, FIN_MONTHLY, etc.).
-3. **Register tasks** — `register_task()` with `TaskID`, `WorkFlowID`, `SequenceID` per task.
-4. **Register parameters** — `register_parameter()` with `ParameterType` for each watermark.
-5. **Instrument** — add `monitor.task()` context manager to 2–3 pilot notebooks.
-6. **Verify** — query `v_taskDetail` and `v_runSummary` after a pilot run.
-7. **Dashboard** — Lakeview dashboard reading from the 6 monitoring views.
-8. **ADF integration** — utility notebooks for ADF write-back; Lookup activity for watermarks.
+Two mechanisms for skipping tasks. Use the right one for the scope of the decision.
+
+| | `ETLconfigTasks.IsActive` | `ETLProcessingSteps.ForceSkip` |
+|---|---|---|
+| Scope | **Permanent** — all future runs | **One run only** — this ExecutionID |
+| Carries to retry? | Yes — config persists | No — new NQUE row = `FALSE` |
+| Cleared by `status_reset()`? | No | Yes — day replay = clean slate |
+| Use case | Task retired / under maintenance | Upstream dep not ready for this run only |
+
+```python
+# Skip one task for this run only (config unchanged — IsActive stays TRUE)
+monitor.skip_task(exec_id, "CORP", "HR_DAILY",
+                  task_id=4, workflow_id=1, sequence_id=2, processing_date="2026-04-09")
+
+# task() picks it up automatically — same code, no branching needed by caller
+with monitor.task(exec_id, "CORP", "HR_DAILY",
+                  task_id=4, workflow_id=1, sequence_id=2,
+                  processing_date="2026-04-09") as t:
+    if t.active:
+        actual_work()    # only runs when NQUE/RQUE/FAIL and not skipped
+    else:
+        print(f"→ skipped ({t.status})")
+
+# Re-enable mid-run (dependency resolved)
+monitor.unskip_task(exec_id, "CORP", "HR_DAILY",
+                    task_id=4, workflow_id=1, sequence_id=2, processing_date="2026-04-09")
+
+# Explicit status check without entering the with block
+status = monitor.task_status(exec_id, "CORP", "HR_DAILY", "2026-04-09",
+                              workflow_id=1, sequence_id=2, task_id=4)
+# Returns 'NQUE', 'RQUE', 'FAIL', or 'NULL'
+```
 
 ---
 
-## What Was NOT Ported
+## Implementation Guide
 
-| Original component | Reason not ported |
-|--------------------|------------------|
-| Trigger / orchestration logic | Out of scope — this framework observes only, never triggers |
-| `#DELTAPARAMETER#` string substitution | Replaced by `v_watermarks.ActiveValue` |
-| `ADFMain` / `ADFPipelines` / `ADFMetaData` | ADF pipeline driver config — not needed for monitoring |
-| `ETLconfigNotifications` | Replace with Databricks SQL Alerts or Lakeview dashboards |
-| T-SQL stored procedures | Replaced entirely by Python class methods |
+### One-time setup (per environment)
+
+Run these once when deploying the framework to a new catalog / environment.
+All steps are idempotent — safe to re-run without data loss (see note below).
+
+1. **Deploy** — `monitor.setup()` creates the schema, 6 tables, 6 views, and seeds sequence stages.
+2. **Register organisation / project** — `register_organisation()`, `register_project()` once per entity.
+3. **Register processes** — `register_process()` once per domain (e.g. `HR_DAILY`, `FIN_MONTHLY`).
+4. **Register tasks** — `register_task()` with `TaskID`, `WorkFlowID`, `SequenceID` per task.
+5. **Register watermarks** — `register_parameter()` with `ParameterType` per watermark or flag.
+6. **Instrument notebooks** — add `monitor.task()` context manager to each notebook / job.
+7. **ADF integration** — create utility notebooks (`etl_start_task`, `etl_end_task`, `etl_fail_task`) per project; wire ADF Lookup activity to `v_watermarks.ActiveValue`.
+8. **Dashboard** — Lakeview dashboard reading from the 6 monitoring views.
+
+> **What `setup()` does on a re-run:**
+> - `CREATE TABLE IF NOT EXISTS` — skips if table exists; **existing data is never touched**.
+> - `CREATE OR REPLACE VIEW` — recreates all 6 views (views hold no data, always safe).
+> - `seed_sequence_data()` — INSERT-ONLY MERGE on `ETLconfigSequence`; existing rows unchanged.
+> - `ALTER TABLE ETLProcessingSteps ADD COLUMN ...` — adds any new columns (e.g. `ForceSkip`) to existing tables; no-op if already present.
+> - Config tables (`ETLconfigTasks`, `ETLconfigParameters`, etc.) and results tables (`ETLProcessingSteps`, `ETLsysLogs`) are **never modified or truncated** by `setup()`.
+
+### Adding new config (ongoing)
+
+Run these whenever the process catalogue grows — no re-deployment needed.
+
+- **New process / domain** — `register_process()` then `register_task()` / `register_parameter()`.
+- **New task in existing process** — `register_task()` with the new `TaskID`. Next `generate_execution_steps()` call picks it up automatically.
+- **New watermark** — `register_parameter()`. Takes effect from the next run.
+- **Deactivate a task permanently** — update `IsActive=FALSE` in `ETLconfigTasks` (or call `register_task(is_active=False)`). No steps generated for it going forward.
+
+### Every run (automated)
+
+These are called by instrumented notebooks, jobs, or ADF activities on each execution.
+
+1. `generate_execution_steps(exec_id, project, process, date)` — creates NQUE rows for all active tasks.
+2. `monitor.task(...) as t` — in each notebook/job cell: starts, tracks, and closes the task automatically.
+3. `get_pending_tasks(...)` — ADF ForEach source; returns runnable tasks with watermarks and file paths.
+4. `advance_watermark(...)` — after DELTA_ID loads only (DELTA_DATE is auto-advanced on DONE).
+
+---
+
+## Future Plans
+
+### 1. Native orchestrator
+
+Add an `orchestrate()` method that drives task execution order natively within Databricks —
+iterating over `get_pending_tasks()` by `WorkFlowID` / `SequenceID`, dispatching parallel tasks
+within each stage, and checking `v_mandatoryBlockers` before advancing to the next stage.
+This would remove the need for ADF ForEach or a separate Databricks Workflow definition
+for teams who want a pure-Python orchestration path.
+
+### 2. ETL notifications (`ETLconfigNotifications`)
+
+A notifications config table and a `notify()` method that sends execution status emails natively
+from within Databricks, scoped to a specific process, run, or task range:
+
+- **Per-process recipient config** — `to`, `cc`, `bcc` addresses registered per `ProjectCode / ProcessLoad`; optional filters by `WorkFlowID`, `SequenceID`, `TaskID`.
+- **Trigger conditions** — on FAIL, on DONE, on mandatory blocker, or on completion of a specific `SequenceID` stage.
+- **HTML email body** — auto-generated from the execution log for the specified run scope: status summary table, per-task rows (WID / SID / TID / TaskName / Status / Duration / LogMessage), watermark values, and a run health indicator.
+- **Native Databricks delivery** — via SMTP or Databricks SQL Alerts webhook, no external orchestrator needed.
 
 ---
 
