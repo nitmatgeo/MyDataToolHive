@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -8,7 +9,9 @@ from excel_ingest.mapping.adapters.base import LLMAdapter
 from excel_ingest.mapping.confidence import CanonicalMapping
 from excel_ingest.mapping.engine import map_to_canonical
 from excel_ingest.metadata import MetadataExtractionResult, extract_metadata
-from excel_ingest.structure import FileProcessingConfig, FileStructureMetadata, analyze_excel_structure
+from excel_ingest.structure import (
+    FileProcessingConfig, FileStatus, FileStructureMetadata, analyze_excel_structure,
+)
 from excel_ingest.validation import FileValidationResult, ValidationStatus, validate_excel_file
 
 
@@ -120,7 +123,7 @@ class ExcelIngestFramework:
         """
         if structure is None:
             structure = self.detect_structure(file_path, config, password)
-        return extract_metadata(file_path, structure, file_id, password)
+        return extract_metadata(file_path, structure, file_id)
 
     # ------------------------------------------------------------------
     # Stage 4
@@ -194,7 +197,6 @@ class ExcelIngestFramework:
 
         # Stage 2
         structure = self.detect_structure(file_path, config, password)
-        from excel_ingest.structure import FileStatus
         if structure.status in (FileStatus.EMPTY_FILE, FileStatus.INVALID_STRUCTURE,
                                 FileStatus.SHEET_NOT_SPECIFIED):
             errors.append(f"Structure detection failed: {structure.status.value}")
@@ -209,7 +211,7 @@ class ExcelIngestFramework:
             )
 
         # Stage 3
-        metadata = extract_metadata(file_path, structure, file_id, password)
+        metadata = extract_metadata(file_path, structure, file_id)
 
         # Stage 4
         mappings = self.map_to_canonical(
@@ -265,10 +267,10 @@ STEP 2 — Define your canonical dictionary (any domain)
   # Fully caller-supplied — no hardcoded fields in the package.
   # Keys = canonical field names.  Values = known aliases for that field.
   canonical_dict = {
-      "employee_id": ["emp id", "staff no", "employee number"],
-      "first_name":  ["first name", "forename", "given name"],
-      "email":       ["email address", "e-mail"],
-      "department":  ["dept", "department", "business unit"],
+      "order_id":     ["order id", "order no", "transaction id"],
+      "product_name": ["product name", "item name", "description"],
+      "store_name":   ["store name", "store", "retail unit"],
+      "quantity":     ["qty", "quantity", "units"],
       # ... add as many fields as needed for your domain
   }
 
@@ -278,7 +280,7 @@ STEP 3 — Run the full pipeline (recommended)
       file_path      = "/Volumes/<catalog>/<schema>/<volume>/data.xlsx",
       canonical_dict = canonical_dict,
       country_code   = "UK",          # optional ISO-2 hint for LLM adapter
-      file_id        = "HR_2026_Q1",  # optional — defaults to filename
+      file_id        = "ORDERS_2026_Q1",  # optional — defaults to filename
       # config       = FileProcessingConfig(sheet_name="Sheet1"),  # multi-sheet files
       # password     = "secret",      # password-protected files
       # prior_mappings = {...},        # boost confidence for previously-seen headers
@@ -351,8 +353,6 @@ OTHER METHODS
 
         pkg_dir = os.path.dirname(os.path.abspath(__file__))
         bundled = os.path.join(pkg_dir, "sample_usage")
-
-        import shutil
 
         def _copy_if_newer(src: str, dst: str) -> bool:
             src_mtime = os.path.getmtime(src)

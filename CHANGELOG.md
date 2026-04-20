@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.1.0a10] — 2026-04-20
+
+### Added
+- **`MetadataExtractionResult.signature_record()`** (`metadata.py`): returns a minimal dict
+  — `file_id`, `file_name`, `sheet_name`, `total_cols`, `header_signature` — designed for
+  schema-change tracking. Persist to a `excel_schema_signatures` reference table after each
+  ingest run and compare on subsequent runs to detect column layout drift without re-mapping.
+- **`MetadataExtractionResult.column_records()`** (`metadata.py`): returns column metadata as
+  a flat list of dicts with human-readable keys (`file_id`, `file_name`, `col_index`,
+  `col_letter`, `hierarchical_header`, `header_section`, `is_blank`, `is_hidden`,
+  `is_merged`, `merge_span`). Intended for display and inspection; use `to_delta_records()`
+  for Delta persistence.
+- **`combine_column_records(results)`** (`metadata.py`, exported from `excel_ingest`): flattens
+  `column_records()` across a list of `MetadataExtractionResult` into one list. Enables a
+  one-liner for displaying all files: `display(spark.createDataFrame(combine_column_records(all_metadata)))`.
+
+### Changed
+- **`header_section` column name**: the section field in `column_records()` is named
+  `header_section` (was `section` in the notebook-level code) — clarifies it partitions
+  columns by blank-column separators within the header structure.
+- **`04-metadata.py` Full Column Listing cell**: replaced manual loop with single
+  `display(spark.createDataFrame(combine_column_records(all_metadata)))` call.
+- **`password` removed from `extract_metadata()`** (`metadata.py`): parameter was accepted
+  but never used — the workbook is not re-opened at Stage 3; all data comes from the
+  already-extracted `structure`. Callers on `framework.extract_metadata()` are unaffected
+  (the method-level `password` is still accepted for the `structure=None` auto-detect path).
+- **Deferred imports promoted to module level** (`metadata.py`, `framework.py`): `import os`,
+  `get_column_letter`, `FileStatus`, and `import shutil` moved from inside function/method
+  bodies to top-level imports.
+- **Type hints added to internal helpers** (`metadata.py`): `_merge_span_for_col` and
+  `_get_horizontal_merge_value` now declare `List[MergedCellInfo]` for `merged_cells`.
+- **`guide()` domain updated** (`framework.py`): canonical_dict example changed from HR
+  (`employee_id`, `first_name`) to FreshMart retail (`order_id`, `product_name`,
+  `store_name`, `quantity`). `file_id` example updated to `ORDERS_2026_Q1`.
+
 ## [0.1.0a9] — 2026-04-20
 
 ### Fixed

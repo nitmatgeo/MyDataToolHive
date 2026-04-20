@@ -4,7 +4,7 @@
 
 A PyPI-publishable Python package (`databricks-excel-ingest-framework`, import: `excel_ingest`)
 for Excel file ingestion on Databricks. Supersedes `Excel-Ingestion-DBXFramework/` — that folder
-will be deleted once this is complete. Version: `0.1.0a9` (pre-release alpha 9).
+will be deleted once this is complete. Version: `0.1.0a10` (pre-release alpha 10).
 
 Primary target is Databricks (Unity Catalog Volumes, DBFS, Foundation Models). Core modules
 (validation, structure, metadata) are platform-independent — openpyxl only, no Databricks

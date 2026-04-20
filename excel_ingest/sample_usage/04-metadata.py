@@ -22,7 +22,7 @@ VOLUME_PATH   = f"/Volumes/{MY_CATALOG}/{INGEST_SCHEMA}/{VOLUME_NAME}"
 # COMMAND ----------
 
 # DBTITLE 1,Initialise Framework
-from excel_ingest import ExcelIngestFramework
+from excel_ingest import ExcelIngestFramework, combine_column_records
 from excel_ingest.structure import FileProcessingConfig
 
 framework = ExcelIngestFramework(spark=spark)
@@ -54,7 +54,7 @@ all_metadata = []
 for cfg in FILE_CONFIGS:
     path      = f"{VOLUME_PATH}/{cfg['file']}"
     structure = framework.detect_structure(path, config=cfg["config"], password=cfg["password"])
-    metadata  = framework.extract_metadata(path, structure, file_id=cfg["id"], password=cfg["password"])
+    metadata  = framework.extract_metadata(path, structure, file_id=cfg["id"])
 
     all_metadata.append(metadata)
     fm = metadata.file_metadata
@@ -75,26 +75,48 @@ for cfg in FILE_CONFIGS:
 # COMMAND ----------
 
 # DBTITLE 1,Full Column Listing — all files (scrollable table)
-# Renders every column across all 12 files as a sortable Databricks table.
-# Filter by file_id or section_id to inspect wide files (S07: 65 cols, S12: 45 cols).
+# combine_column_records() flattens all metadata into one list ready for display().
+# Filter by file_id or header_section to inspect wide files (S07: 65 cols, S12: 45 cols).
 
-col_records = []
-for cfg, meta in zip(FILE_CONFIGS, all_metadata):
-    for col in meta.column_metadata:
-        col_records.append({
-            "file_id":            cfg["id"],
-            "file_name":          cfg["file"],
-            "col_index":          col.column_index,
-            "col_letter":         col.column_letter,
-            "section":            col.section_id,
-            "hierarchical_header": col.hierarchical_header,
-            "is_blank":           col.is_blank_column,
-            "is_hidden":          col.is_hidden_column,
-            "is_merged":          col.is_part_of_merge,
-            "merge_span":         col.merge_span_cols,
-        })
+display(spark.createDataFrame(combine_column_records(all_metadata)))
 
-display(spark.createDataFrame(col_records))
+# COMMAND ----------
+
+# DBTITLE 1,Multi-Sheet Iteration — extract metadata for every sheet in a file
+# Demonstrates how to iterate all visible sheets without hardcoding sheet names.
+# validate() gives you the sheet list; detect_structure() + extract_metadata() run per sheet.
+#
+# S05 → 3 sheets with different structures → unique signature per sheet
+# S06 → 4 regional sheets with identical structure → all signatures match
+
+from excel_ingest.structure import FileProcessingConfig
+
+for fname, fid in [
+    ("s05_multi_sheet_diff_structure.xlsx", "S05"),
+    ("s06_multi_sheet_same_structure.xlsx", "S06"),
+]:
+    path       = f"{VOLUME_PATH}/{fname}"
+    validation = framework.validate(path)
+    sheets     = validation.visible_sheet_names
+
+    print(f"\n{fname}  ({len(sheets)} visible sheets)")
+    sheet_sigs = {}
+
+    for sheet in sheets:
+        config   = FileProcessingConfig(sheet_name=sheet)
+        structure = framework.detect_structure(path, config=config)
+        metadata  = framework.extract_metadata(path, structure, file_id=f"{fid}_{sheet}")
+
+        sig = metadata.file_metadata.header_signature[:16]
+        match = next((s for s, v in sheet_sigs.items() if v == sig), None)
+        tag   = f"MATCH ({match})" if match else "UNIQUE"
+        sheet_sigs[sheet] = sig
+
+        print(f"  [{tag:<20}]  sheet={sheet:<20}  cols={metadata.file_metadata.total_cols:<4}  sig={sig}...")
+        for col in metadata.column_metadata[:4]:
+            print(f"             {col.column_letter:<4} {col.hierarchical_header}")
+        if len(metadata.column_metadata) > 4:
+            print(f"             ... {len(metadata.column_metadata) - 4} more columns")
 
 # COMMAND ----------
 
@@ -109,6 +131,16 @@ for cfg, meta in zip(FILE_CONFIGS, all_metadata):
     else:
         seen[sig] = cfg['file']
         print(f"  UNIQUE {cfg['file']}  [{sig}...]")
+
+# COMMAND ----------
+
+# DBTITLE 1,(Optional) Persist schema signatures to a reference table
+# signature_record() returns file_id, file_name, sheet_name, total_cols, header_signature.
+# Store this after every ingest run — compare on the next run to detect schema drift.
+
+# spark.createDataFrame([m.signature_record() for m in all_metadata]).write \
+#     .mode("append") \
+#     .saveAsTable(f"{MY_CATALOG}.{INGEST_SCHEMA}.excel_schema_signatures")
 
 # COMMAND ----------
 

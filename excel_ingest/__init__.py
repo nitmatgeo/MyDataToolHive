@@ -32,7 +32,7 @@ Quick start::
 from excel_ingest.framework import ExcelIngestFramework, IngestResult
 from excel_ingest.validation import FileValidationResult, ValidationStatus
 from excel_ingest.structure import FileStructureMetadata, FileProcessingConfig, FileStatus
-from excel_ingest.metadata import MetadataExtractionResult
+from excel_ingest.metadata import MetadataExtractionResult, combine_column_records
 from excel_ingest.mapping import map_to_canonical, CanonicalMapping, MappingStatus, MappingMethod
 
 __all__ = [
@@ -44,6 +44,7 @@ __all__ = [
     "FileProcessingConfig",
     "FileStatus",
     "MetadataExtractionResult",
+    "combine_column_records",
     "map_to_canonical",
     "CanonicalMapping",
     "MappingStatus",

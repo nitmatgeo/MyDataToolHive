@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from excel_ingest.structure import FileStructureMetadata
+from openpyxl.utils import get_column_letter
+
+from excel_ingest.structure import FileStructureMetadata, MergedCellInfo
 
 
 @dataclass
@@ -52,18 +55,63 @@ class MetadataExtractionResult:
     column_metadata: List[ColumnMetadata]
     messages: List[str] = field(default_factory=list)
 
+    def column_records(self) -> List[Dict[str, Any]]:
+        """Flat list of dicts for every column — ready for display(), DataFrame, or export.
+
+        Column names are human-readable. Use this for inspection and ad-hoc analysis.
+        Use to_delta_records() when persisting to Delta tables.
+        """
+        return [
+            {
+                "file_id":             self.file_metadata.file_id,
+                "file_name":           self.file_metadata.file_name,
+                "col_index":           c.column_index,
+                "col_letter":          c.column_letter,
+                "hierarchical_header": c.hierarchical_header,
+                "header_section":      c.section_id,
+                "is_blank":            c.is_blank_column,
+                "is_hidden":           c.is_hidden_column,
+                "is_merged":           c.is_part_of_merge,
+                "merge_span":          c.merge_span_cols,
+            }
+            for c in self.column_metadata
+        ]
+
+    def signature_record(self) -> Dict[str, Any]:
+        """Minimal dict for schema-change tracking — file identity + header signature only.
+
+        Designed to be stored in a signatures reference table or config store and
+        compared across runs to detect column layout changes::
+
+            # Persist after each ingest
+            spark.createDataFrame([result.metadata.signature_record()]) \\
+                .write.mode("append").saveAsTable("...excel_schema_signatures")
+
+            # Detect drift: if the signature changed, re-map
+            if new_sig != stored_sig:
+                # schema changed — trigger fresh mapping + alert
+        """
+        fm = self.file_metadata
+        return {
+            "file_id":          fm.file_id,
+            "file_name":        fm.file_name,
+            "sheet_name":       fm.sheet_name,
+            "total_cols":       fm.total_cols,
+            "header_signature": fm.header_signature,
+        }
+
     def to_delta_records(self) -> List[Dict[str, Any]]:
         return [
             {
-                "file_id": self.file_metadata.file_id,
-                "column_index": c.column_index,
-                "column_letter": c.column_letter,
+                "file_id":             self.file_metadata.file_id,
+                "column_index":        c.column_index,
+                "column_letter":       c.column_letter,
                 "hierarchical_header": c.hierarchical_header,
-                "section_id": c.section_id,
-                "is_blank_column": c.is_blank_column,
-                "is_hidden_column": c.is_hidden_column,
-                "is_part_of_merge": c.is_part_of_merge,
-                "merge_span_cols": c.merge_span_cols,
+                "section_id":          c.section_id,
+                "is_blank_column":     c.is_blank_column,
+                "is_hidden_column":    c.is_hidden_column,
+                "is_part_of_merge":    c.is_part_of_merge,
+                "merge_span_cols":     c.merge_span_cols,
             }
             for c in self.column_metadata
         ]
@@ -93,14 +141,14 @@ def _assign_section_ids(col_count: int, blank_col_indices: List[int]) -> List[in
     return section_ids
 
 
-def _merge_span_for_col(col_idx: int, merged_cells) -> int:
+def _merge_span_for_col(col_idx: int, merged_cells: List[MergedCellInfo]) -> int:
     for m in merged_cells:
         if m.min_col <= col_idx <= m.max_col and m.span_cols > 1:
             return m.span_cols
     return 1
 
 
-def _get_horizontal_merge_value(row_idx: int, col_idx: int, merged_cells) -> Optional[str]:
+def _get_horizontal_merge_value(row_idx: int, col_idx: int, merged_cells: List[MergedCellInfo]) -> Optional[str]:
     """Return the parent label when col_idx sits inside a horizontal merge in row_idx.
 
     Only horizontal merges (same row, multiple columns) propagate their label to
@@ -112,6 +160,16 @@ def _get_horizontal_merge_value(row_idx: int, col_idx: int, merged_cells) -> Opt
                 and m.min_col < col_idx <= m.max_col):
             return m.top_left_value
     return None
+
+
+def combine_column_records(results: List[MetadataExtractionResult]) -> List[Dict[str, Any]]:
+    """Flatten column_records() from a list of MetadataExtractionResult into one list.
+
+    Typical use — display all files in one scrollable table::
+
+        display(spark.createDataFrame(combine_column_records(all_metadata)))
+    """
+    return [rec for r in results for rec in r.column_records()]
 
 
 def _generate_signature(column_headers: List[str]) -> str:
@@ -127,9 +185,7 @@ def extract_metadata(
     file_path: str,
     structure: FileStructureMetadata,
     file_id: Optional[str] = None,
-    password: Optional[str] = None,
 ) -> MetadataExtractionResult:
-    import os
     msgs: List[str] = []
 
     if file_id is None:
@@ -142,7 +198,6 @@ def extract_metadata(
     hidden_cols = set(structure.hidden_column_indices)
     total_cols = structure.total_cols
 
-    from openpyxl.utils import get_column_letter
     section_ids = _assign_section_ids(total_cols, structure.blank_column_indices)
 
     columns: List[ColumnMetadata] = []
@@ -156,7 +211,8 @@ def extract_metadata(
                 row_vals = header_struct.raw_headers.get(row_idx, [])
                 val = row_vals[col_idx - 1] if col_idx - 1 < len(row_vals) else None
                 if not val or not str(val).strip():
-                    val = _get_horizontal_merge_value(row_idx, col_idx, merged)
+                    if col_idx not in blank_cols:
+                        val = _get_horizontal_merge_value(row_idx, col_idx, merged)
                 raw_texts.append(val if val and str(val).strip() else None)
         else:
             raw_texts = [None]
