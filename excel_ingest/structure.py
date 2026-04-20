@@ -183,10 +183,28 @@ def analyze_excel_structure(
     local_path = _resolve_local_path(file_path)
     msgs: List[str] = []
 
-    load_kwargs = {"read_only": False, "data_only": True}
     if password is not None:
-        load_kwargs["password"] = password
-    wb = load_workbook(local_path, **load_kwargs)
+        _use_kwarg = False
+        try:
+            import io, msoffcrypto
+            with open(local_path, "rb") as f:
+                office_file = msoffcrypto.OfficeFile(f)
+                office_file.load_key(password=password)
+                decrypted = io.BytesIO()
+                office_file.decrypt(decrypted)
+            decrypted.seek(0)
+            wb = load_workbook(decrypted, read_only=False, data_only=True)
+        except ImportError:
+            _use_kwarg = True
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "password" in msg or "decrypt" in msg:
+                raise
+            _use_kwarg = True  # not AES-encrypted — fall through to openpyxl worksheet kwarg
+        if _use_kwarg:
+            wb = load_workbook(local_path, read_only=False, data_only=True, password=password)
+    else:
+        wb = load_workbook(local_path, read_only=False, data_only=True)
 
     sheet_name, sheet_msgs = _resolve_sheet(wb, config)
     msgs.extend(sheet_msgs)

@@ -110,12 +110,33 @@ def _validate_excel_format(file_path: str) -> Tuple[bool, Optional[str], List[st
 
 
 def _read_workbook(file_path: str, password: Optional[str]):
+    import io
     import openpyxl
     local_path = _resolve_local_path(file_path)
-    kwargs = {"read_only": True, "data_only": True}
-    if password is not None:   # empty string is a valid password; only None means "no password"
-        kwargs["password"] = password
-    return openpyxl.load_workbook(local_path, **kwargs)
+    if password is not None:
+        # Try msoffcrypto first (handles file-level AES encryption).
+        # Falls through to openpyxl worksheet-level password kwarg when:
+        #   - msoffcrypto is not installed (ImportError), or
+        #   - file is not AES-encrypted (worksheet protection only — msoffcrypto raises FileFormatError etc.)
+        # Re-raises only when msoffcrypto confirms a wrong-password failure.
+        try:
+            import msoffcrypto
+            with open(local_path, "rb") as f:
+                office_file = msoffcrypto.OfficeFile(f)
+                office_file.load_key(password=password)
+                decrypted = io.BytesIO()
+                office_file.decrypt(decrypted)
+            decrypted.seek(0)
+            return openpyxl.load_workbook(decrypted, read_only=True, data_only=True)
+        except ImportError:
+            pass
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "password" in msg or "decrypt" in msg:
+                raise
+            # Not AES-encrypted — fall through to openpyxl worksheet-level kwarg
+        return openpyxl.load_workbook(local_path, read_only=True, data_only=True, password=password)
+    return openpyxl.load_workbook(local_path, read_only=True, data_only=True)
 
 
 def _check_password_and_sheets(

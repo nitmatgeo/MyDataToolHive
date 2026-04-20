@@ -7,7 +7,12 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Config — point at the Volume created in 00-setup-volume
+# DBTITLE 1,Install & Inherit Variables
+%run ./01-install
+
+# COMMAND ----------
+
+# DBTITLE 1,Config — point at the Volume created in 01-install
 MY_CATALOG    = "sampledatacatalog"
 INGEST_SCHEMA = "bronze"
 VOLUME_NAME   = "excel_ingest_samples"
@@ -78,3 +83,30 @@ print(f"Validated {len(results)} files:")
 print(f"  PASSED  : {passed}")
 print(f"  WARNING : {warned}   (hidden sheets — non-blocking)")
 print(f"  FAILED  : {failed}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Negative Examples — File Not Found / Invalid Path
+
+NEGATIVE_CASES = [
+    {"path": f"{VOLUME_PATH}/does_not_exist.xlsx",          "label": "File not found — path does not exist"},
+    {"path": f"/Volumes/wrong_catalog/bronze/vol/data.xlsx", "label": "Invalid volume path — wrong catalog"},
+    {"path": f"{VOLUME_PATH}/report.csv",                   "label": "Wrong file type — .csv not supported"},
+    {"path": f"{VOLUME_PATH}/s11_password_protected.xlsx",  "label": "Encrypted — no password supplied",    "password": None},
+    {"path": f"{VOLUME_PATH}/s11_password_protected.xlsx",  "label": "Encrypted — wrong password",          "password": "WrongPass"},
+    {"path": f"{VOLUME_PATH}/s11_password_protected.xlsx",  "label": "Encrypted — correct password (PASS)", "password": "Password1234"},
+]
+
+print("Negative / error scenarios:\n")
+for case in NEGATIVE_CASES:
+    r    = framework.validate(case["path"], password=case.get("password"))
+    icon = icons.get(r.status.value, "?")
+    print(f"[{icon}] {case['label']}")
+    print(f"       Path     : {case['path']}")
+    print(f"       Status   : {r.status.value}")
+    print(f"       Exists   : {r.file_exists}")
+    if r.errors:
+        print(f"       Errors   : {r.errors}")
+    if r.warnings:
+        print(f"       Warnings : {r.warnings}")
+    print()

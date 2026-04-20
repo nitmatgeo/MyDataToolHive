@@ -8,6 +8,11 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Install & Inherit Variables
+%run ./01-install
+
+# COMMAND ----------
+
 # DBTITLE 1,Config
 MY_CATALOG    = "sampledatacatalog"
 INGEST_SCHEMA = "bronze"
