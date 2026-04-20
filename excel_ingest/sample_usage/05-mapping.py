@@ -64,7 +64,7 @@ CANONICAL_DICT = {
 # COMMAND ----------
 
 # DBTITLE 1,Initialise Framework (rule-only — no LLM)
-from excel_ingest import ExcelIngestFramework, MappingStatus
+from excel_ingest import ExcelIngestFramework
 from excel_ingest.structure import FileProcessingConfig
 
 framework = ExcelIngestFramework(spark=spark)
@@ -78,91 +78,105 @@ framework = ExcelIngestFramework(spark=spark)
 
 # COMMAND ----------
 
-# DBTITLE 1,Helper — print mapping result
+# DBTITLE 1,Mapping Status Reference
+# mapping_status values in the output tables below — what each means and what action is needed.
+# requires_action=True means a human must review the column before it can be loaded safely.
 
-def _print_result(label, result):
-    auto    = [m for m in result.mappings if m.mapping_status == MappingStatus.AUTO_APPROVED]
-    review  = [m for m in result.mappings if m.mapping_status == MappingStatus.NEEDS_REVIEW]
-    manual  = [m for m in result.mappings if m.mapping_status == MappingStatus.REQUIRES_HUMAN]
-    unmapped= [m for m in result.mappings if m.mapping_status == MappingStatus.UNMAPPED]
+from excel_ingest import MappingStatus
 
-    print(f"{'='*70}")
-    print(f"  {label}")
-    print(f"  Success: {result.success}  |  Mapped: {len(auto)+len(review)+len(manual)}/{len(result.mappings)}"
-          f"  |  AUTO={len(auto)}  REVIEW={len(review)}  HUMAN={len(manual)}  UNMAPPED={len(unmapped)}")
-    print(f"{'='*70}")
-    for m in result.mappings:
-        icon = "OK" if m.mapping_status == MappingStatus.AUTO_APPROVED else (
-               "??" if m.mapping_status == MappingStatus.NEEDS_REVIEW else (
-               "!!" if m.mapping_status == MappingStatus.REQUIRES_HUMAN else "--"))
-        print(f"  [{icon}] conf={m.final_confidence:.2f}  {m.hierarchical_header:<40}  ->  {m.canonical_field or 'UNMAPPED'}")
-    print()
+display(spark.createDataFrame([
+    {"mapping_status": s.value, "description": s.description, "requires_action": s.requires_action}
+    for s in MappingStatus
+]))
 
 # COMMAND ----------
 
 # DBTITLE 1,S01 — Simple single sheet
 
-result = framework.ingest(
+result_s01 = framework.ingest(
     file_path=f"{VOLUME_PATH}/s01_simple_single_sheet.xlsx",
     canonical_dict=CANONICAL_DICT,
     file_id="S01",
     country_code="UK",
 )
-_print_result("S01 — Simple single sheet", result)
+display(spark.createDataFrame([result_s01.summary_record()]))
+display(spark.createDataFrame(result_s01.mapping_records()))
 
 # COMMAND ----------
 
 # DBTITLE 1,S02 — Multi-row merged headers (Product Catalogue)
 
-result = framework.ingest(
+result_s02 = framework.ingest(
     file_path=f"{VOLUME_PATH}/s02_multi_row_merged_headers.xlsx",
     canonical_dict=CANONICAL_DICT,
     file_id="S02",
     config=FileProcessingConfig(sheet_name="Product Catalogue", static_header_rows=[1, 2]),
 )
-_print_result("S02 — Multi-row merged headers", result)
+display(spark.createDataFrame([result_s02.summary_record()]))
+display(spark.createDataFrame(result_s02.mapping_records()))
 
 # COMMAND ----------
 
 # DBTITLE 1,S07 — Wide Extended sheet (65 cols, 7 merged sections)
 
-result = framework.ingest(
+result_s07 = framework.ingest(
     file_path=f"{VOLUME_PATH}/s07_wide_standard_vs_extended.xlsx",
     canonical_dict=CANONICAL_DICT,
     file_id="S07_EXT",
     config=FileProcessingConfig(sheet_name="Extended", static_header_rows=[1, 2]),
 )
-_print_result("S07 — Wide Extended sheet (65 cols)", result)
+display(spark.createDataFrame([result_s07.summary_record()]))
+display(spark.createDataFrame(result_s07.mapping_records()))
 
 # COMMAND ----------
 
 # DBTITLE 1,S11 — Password protected
 
-result = framework.ingest(
+result_s11 = framework.ingest(
     file_path=f"{VOLUME_PATH}/s11_password_protected.xlsx",
     canonical_dict=CANONICAL_DICT,
     file_id="S11",
     password="Password1234",
 )
-_print_result("S11 — Password protected", result)
+display(spark.createDataFrame([result_s11.summary_record()]))
+display(spark.createDataFrame(result_s11.mapping_records()))
 
 # COMMAND ----------
 
 # DBTITLE 1,S12 — Wide 3-level merged headers — UK sheet (45 cols)
 
-result = framework.ingest(
+result_s12 = framework.ingest(
     file_path=f"{VOLUME_PATH}/s12_wide_complex_3level_headers.xlsx",
     canonical_dict=CANONICAL_DICT,
     file_id="S12_UK",
     config=FileProcessingConfig(sheet_name="UK", static_header_rows=[1, 2, 3]),
     country_code="UK",
 )
-_print_result("S12 — Wide 3-level merged headers (UK, 45 cols)", result)
+display(spark.createDataFrame([result_s12.summary_record()]))
+display(spark.createDataFrame(result_s12.mapping_records()))
+
+# COMMAND ----------
+
+# DBTITLE 1,All Files — Summary across all 5 files
+# One row per file — auto_approved / needs_review / requires_human / unmapped counts.
+# requires_action columns in the per-file detail tables flag columns needing human attention.
+
+all_results = [result_s01, result_s02, result_s07, result_s11, result_s12]
+display(spark.createDataFrame([r.summary_record() for r in all_results]))
+
+# COMMAND ----------
+
+# DBTITLE 1,All Files — Combined mapping detail (scrollable)
+# One row per column across all 5 files.
+# Filter by file_id, mapping_status, or requires_action=True to find columns needing review.
+
+all_records = [rec for r in all_results for rec in r.mapping_records()]
+display(spark.createDataFrame(all_records))
 
 # COMMAND ----------
 
 # DBTITLE 1,(Optional) Persist mapping records to Delta
 
-# spark.createDataFrame(result.mapping_records()).write \
+# spark.createDataFrame(all_records).write \
 #     .mode("append") \
 #     .saveAsTable(f"{MY_CATALOG}.{INGEST_SCHEMA}.excel_canonical_mappings")

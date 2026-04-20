@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from excel_ingest.mapping.adapters.base import LLMAdapter
-from excel_ingest.mapping.confidence import CanonicalMapping
+from excel_ingest.mapping.confidence import CanonicalMapping, MappingStatus
 from excel_ingest.mapping.engine import map_to_canonical
 from excel_ingest.metadata import MetadataExtractionResult, extract_metadata
 from excel_ingest.structure import (
@@ -29,6 +29,28 @@ class IngestResult:
 
     def mapping_records(self) -> List[Dict[str, Any]]:
         return [m.to_dict() for m in self.mappings]
+
+    def summary_record(self) -> Dict[str, Any]:
+        """Aggregate mapping counts for this file — one dict, ready for display() or logging.
+
+        Columns map cleanly to the four MappingStatus values so callers never need
+        to import or reference MappingStatus directly::
+
+            display(spark.createDataFrame([result.summary_record()]))
+        """
+        file_id = self.metadata.file_metadata.file_id if self.metadata else os.path.basename(self.file_path)
+        counts: Dict[str, int] = {s.value: 0 for s in MappingStatus}
+        for m in self.mappings:
+            counts[m.mapping_status.value] += 1
+        return {
+            "file_id":        file_id,
+            "success":        self.success,
+            "total_cols":     len(self.mappings),
+            "auto_approved":  counts[MappingStatus.AUTO_APPROVED.value],
+            "needs_review":   counts[MappingStatus.NEEDS_REVIEW.value],
+            "requires_human": counts[MappingStatus.REQUIRES_HUMAN.value],
+            "unmapped":       counts[MappingStatus.UNMAPPED.value],
+        }
 
     def metadata_records(self) -> List[Dict[str, Any]]:
         return self.metadata.to_delta_records() if self.metadata else []

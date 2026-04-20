@@ -76,61 +76,59 @@ for cfg in FILE_CONFIGS:
 
 # DBTITLE 1,Full Column Listing — all files (scrollable table)
 # combine_column_records() flattens all metadata into one list ready for display().
-# Filter by file_id or header_section to inspect wide files (S07: 65 cols, S12: 45 cols).
+# Filter by file_id or column_group to inspect wide files (S07: 65 cols, S12: 45 cols).
 
 display(spark.createDataFrame(combine_column_records(all_metadata)))
 
 # COMMAND ----------
 
 # DBTITLE 1,Multi-Sheet Iteration — extract metadata for every sheet in a file
-# Demonstrates how to iterate all visible sheets without hardcoding sheet names.
-# validate() gives you the sheet list; detect_structure() + extract_metadata() run per sheet.
-#
-# S05 → 3 sheets with different structures → unique signature per sheet
-# S06 → 4 regional sheets with identical structure → all signatures match
+# validate() gives the sheet list — no hardcoding needed.
+# schema_match: sheets sharing a signature have identical column layouts.
+# S05 → 3 sheets, all different structures → all UNIQUE
+# S06 → 4 regional sheets, identical structure → UK is UNIQUE, US/DE/AU are MATCH
 
-from excel_ingest.structure import FileProcessingConfig
+ms_sheet_records = []
+ms_col_records   = []
 
 for fname, fid in [
     ("s05_multi_sheet_diff_structure.xlsx", "S05"),
     ("s06_multi_sheet_same_structure.xlsx", "S06"),
 ]:
-    path       = f"{VOLUME_PATH}/{fname}"
-    validation = framework.validate(path)
-    sheets     = validation.visible_sheet_names
-
-    print(f"\n{fname}  ({len(sheets)} visible sheets)")
-    sheet_sigs = {}
+    path   = f"{VOLUME_PATH}/{fname}"
+    sheets = framework.validate(path).visible_sheet_names
 
     for sheet in sheets:
-        config   = FileProcessingConfig(sheet_name=sheet)
+        config    = FileProcessingConfig(sheet_name=sheet)
         structure = framework.detect_structure(path, config=config)
-        metadata  = framework.extract_metadata(path, structure, file_id=f"{fid}_{sheet}")
+        meta      = framework.extract_metadata(path, structure, file_id=fid)
 
-        sig = metadata.file_metadata.header_signature[:16]
-        match = next((s for s, v in sheet_sigs.items() if v == sig), None)
-        tag   = f"MATCH ({match})" if match else "UNIQUE"
-        sheet_sigs[sheet] = sig
+        ms_sheet_records.append(meta.signature_record())
+        ms_col_records.extend(meta.column_records())
 
-        print(f"  [{tag:<20}]  sheet={sheet:<20}  cols={metadata.file_metadata.total_cols:<4}  sig={sig}...")
-        for col in metadata.column_metadata[:4]:
-            print(f"             {col.column_letter:<4} {col.hierarchical_header}")
-        if len(metadata.column_metadata) > 4:
-            print(f"             ... {len(metadata.column_metadata) - 4} more columns")
+# Compute schema_group — first sheet in workbook tab order with a given signature anchors the group.
+# All sheets sharing that signature get schema_group = that first sheet's name.
+# is_header_unique = True only for the anchor sheet (first occurrence).
+_seen = {}
+for rec in ms_sheet_records:
+    anchor = _seen.setdefault(rec["header_signature"], rec["sheet_name"])
+    rec["schema_group"]      = anchor
+    rec["is_header_unique"]  = anchor == rec["sheet_name"]
+
+print("Sheet summary:")
+display(spark.createDataFrame(ms_sheet_records))
+
+print("Column listing:")
+display(spark.createDataFrame(ms_col_records))
 
 # COMMAND ----------
 
 # DBTITLE 1,Signature Comparison — detect matching layouts
+# signature_record() = file_id, file_name, sheet_name, total_cols, header_signature.
+# Files with the same header_signature have identical column layouts.
+# Store this table after every ingest run — compare on the next run to detect schema drift.
 
-print("Signature comparison (files with identical layouts share a signature):\n")
-seen = {}
-for cfg, meta in zip(FILE_CONFIGS, all_metadata):
-    sig = meta.file_metadata.header_signature[:16]
-    if sig in seen:
-        print(f"  MATCH  {cfg['file']} == {seen[sig]}")
-    else:
-        seen[sig] = cfg['file']
-        print(f"  UNIQUE {cfg['file']}  [{sig}...]")
+display(spark.createDataFrame([m.signature_record() for m in all_metadata]))
 
 # COMMAND ----------
 

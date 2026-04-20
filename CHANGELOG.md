@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.1.0a11] — 2026-04-20
+
+### Added
+- **`MetadataExtractionResult.signature_record()`** (`metadata.py`): minimal dict — `file_id`,
+  `file_name`, `sheet_name`, `total_cols`, `header_signature` — for schema-change tracking.
+  Persist to `excel_schema_signatures` after each run; compare on the next run to detect drift.
+- **`combine_column_records(results)`** (`metadata.py`, exported from `excel_ingest`): flattens
+  `column_records()` across a list of results into one call.
+  `display(spark.createDataFrame(combine_column_records(all_metadata)))`
+- **`MappingStatus.description`** (`mapping/confidence.py`): plain-English explanation of each
+  status value including the confidence threshold and required action. Surfaces in the notebook
+  status reference table so users never need to look up internal enum values.
+- **`MappingStatus.requires_action`** (`mapping/confidence.py`): `True` for `NEEDS_REVIEW`,
+  `REQUIRES_HUMAN`, and `UNMAPPED` — any status where a human must act before the column can
+  be safely loaded. `False` for `AUTO_APPROVED` only.
+- **`status_description` and `requires_action` in `CanonicalMapping.to_dict()`**
+  (`mapping/confidence.py`): both fields are now included in the `mapping_records()` DataFrame
+  output — callers never need to import or switch on `MappingStatus` to act on results.
+- **`IngestResult.summary_record()`** (`framework.py`): one-dict aggregate per file —
+  `file_id`, `success`, `total_cols`, `auto_approved`, `needs_review`, `requires_human`,
+  `unmapped`. Enables a one-liner cross-file summary:
+  `display(spark.createDataFrame([r.summary_record() for r in all_results]))`.
+- **`05-mapping.py` Mapping Status Reference cell**: displays all `MappingStatus` values with
+  `description` and `requires_action` as a Spark DataFrame — users understand the output
+  without consulting external docs.
+- **`05-mapping.py` Summary cells**: each file now shows `result.summary_record()` as a
+  DataFrame before the per-column detail — `MappingStatus` no longer imported in the notebook.
+- **`05-mapping.py` All Files Summary cell**: `display(spark.createDataFrame([r.summary_record() for r in all_results]))` — one row per file, all five files.
+- **`05-mapping.py` Combined mapping detail cell**: all mapping records across all 5 files in
+  one scrollable DataFrame — filterable by `file_id`, `mapping_status`, or `requires_action`.
+
+### Changed
+- **`column_group`** (`metadata.py`): `column_records()` field renamed from `header_section`
+  to `column_group` — partitions columns by blank separator columns in the sheet.
+- **`password` removed from `extract_metadata()`** (`metadata.py`): parameter was never used
+  at Stage 3 — all data is already in the `structure` object. Safe for password-protected
+  files; password is only needed at Stage 2 (`detect_structure`).
+- **Deferred imports promoted to module level** (`metadata.py`, `framework.py`): `import os`,
+  `get_column_letter`, `FileStatus`, `import shutil` moved from inside function bodies to top.
+- **Type hints on internal helpers** (`metadata.py`): `List[MergedCellInfo]` added to
+  `_merge_span_for_col` and `_get_horizontal_merge_value`.
+- **`guide()` domain updated** (`framework.py`): example canonical_dict and file_id updated
+  from HR to FreshMart retail.
+- **`04-metadata.py` Full Column Listing**: replaced manual loop with
+  `display(spark.createDataFrame(combine_column_records(all_metadata)))`.
+- **`04-metadata.py` Multi-Sheet Iteration**: rewritten to output two Spark DataFrames —
+  sheet summary (with `schema_group` and `is_header_unique`) and full column listing.
+  `schema_group` = first sheet in workbook tab order sharing that signature;
+  `is_header_unique` = True for that anchor sheet only.
+- **`04-metadata.py` Signature Comparison**: replaced print loop with
+  `display(spark.createDataFrame([m.signature_record() for m in all_metadata]))`.
+- **`05-mapping.py`**: removed `_print_result()` print helper; all output is now Spark
+  DataFrames. `MappingStatus` import removed from the notebook — status semantics are
+  fully self-contained in the DataFrame columns (`mapping_status`, `status_description`,
+  `requires_action`).
+
 ## [0.1.0a10] — 2026-04-20
 
 ### Added

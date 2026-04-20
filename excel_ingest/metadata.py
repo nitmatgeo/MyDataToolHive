@@ -68,7 +68,7 @@ class MetadataExtractionResult:
                 "col_index":           c.column_index,
                 "col_letter":          c.column_letter,
                 "hierarchical_header": c.hierarchical_header,
-                "header_section":      c.section_id,
+                "column_group":        c.section_id,
                 "is_blank":            c.is_blank_column,
                 "is_hidden":           c.is_hidden_column,
                 "is_merged":           c.is_part_of_merge,
