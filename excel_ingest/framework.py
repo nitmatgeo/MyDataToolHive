@@ -85,7 +85,7 @@ class ExcelIngestFramework:
         framework = ExcelIngestFramework(spark=spark)
         result = framework.ingest(
             file_path="/Volumes/catalog/schema/vol/data.xlsx",
-            canonical_dict={"employee_id": ["emp id", "staff no"], ...},
+            canonical_dict={"order_id": ["order no", "transaction id"], ...},
         )
 
         # With a Databricks LLM adapter
@@ -373,18 +373,16 @@ STEP 6 — Build a bronze Delta table from metadata
   # Superset of all column names across all files
   # Files with fewer columns simply have NULL in the extra columns
   all_cols = build_superset_schema(all_metadata)
-  # → ['city', 'customer_id', 'customer_name', 'department', 'employee_id', ...]
+  # → ['city', 'customer_id', 'gross_amount', 'order_date', 'order_id', 'product_name', ...]
 
   # DDL — all columns as STRING; cast to correct types in the silver layer
   col_defs = ", ".join(f"`{c}` STRING" for c in all_cols)
-  spark.sql(f"""
-      CREATE TABLE IF NOT EXISTS {MY_CATALOG}.{INGEST_SCHEMA}.hr_bronze
-      ({col_defs}, source_file STRING, source_sheet STRING)
-  """)
+  ddl = f"CREATE TABLE IF NOT EXISTS {{MY_CATALOG}}.{{INGEST_SCHEMA}}.orders_bronze ({col_defs}, source_file STRING, source_sheet STRING)"
+  spark.sql(ddl)
 
   # Per file: bronze_schema() maps column name → column index in that file
   schema = meta.bronze_schema()
-  # → {"employee_id": 1, "first_name": 2, "department": 5, ...}
+  # → {"order_id": 1, "order_date": 2, "product_name": 5, ...}
   # Columns absent from this file are NULL-filled when writing to the superset table.
 
 STEP 7 — Persist results to Delta (optional)

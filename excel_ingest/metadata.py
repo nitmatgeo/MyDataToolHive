@@ -88,7 +88,7 @@ class MetadataExtractionResult:
         into a superset bronze table — columns absent from this file are NULL-filled::
 
             schema = meta.bronze_schema()
-            # {"employee_id": 1, "first_name": 2, ...}
+            # {"order_id": 1, "product_name": 2, ...}
         """
         return {
             col.db_canonical_bronze_column_name: col.column_index
@@ -260,8 +260,8 @@ def build_superset_schema(results: List[MetadataExtractionResult]) -> List[str]:
     """Return sorted list of all distinct db_canonical_bronze_column_names across a list of results.
 
     Use to derive the superset column set for a consolidated bronze table when ingesting
-    multiple files with varying structures (e.g. 60 country HR files where some columns
-    are GDPR-suppressed or country-specific). Missing columns in individual files load
+    multiple files with varying structures (e.g. 60 regional sales reports where some columns
+    are GDPR-suppressed or market-specific). Missing columns in individual files load
     as NULL when the superset schema is used::
 
         all_cols = build_superset_schema(all_sheet1_metadata)

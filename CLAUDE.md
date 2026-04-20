@@ -8,7 +8,7 @@ will be deleted once this is complete. Version: `0.1.0a11` (pre-release alpha 11
 
 Primary target is Databricks (Unity Catalog Volumes, DBFS, Foundation Models). Core modules
 (validation, structure, metadata) are platform-independent — openpyxl only, no Databricks
-dependency. LLM mapping adapters are optional extras. Version: `0.1.0a13` (pre-release alpha 12, last published: a10).
+dependency. LLM mapping adapters are optional extras. Version: `0.1.0a14` (pre-release alpha 12, last published: a10).
 
 ---
 
@@ -112,7 +112,7 @@ framework = ExcelIngestFramework(spark=spark, adapter=adapter)
 # Full pipeline in one call
 result = framework.ingest(
     file_path="/Volumes/catalog/schema/volume/data.xlsx",
-    canonical_dict={"employee_id": ["emp id", "staff no"], ...},
+    canonical_dict={"order_id": ["order no", "transaction id"], ...},
     country_code="UK",
 )
 
@@ -139,6 +139,6 @@ python -m twine upload dist/*   # publish only
 
 - Distribution name : `databricks-excel-ingest-framework`
 - Import name       : `excel_ingest`
-- Version           : `0.1.0a13`
+- Version           : `0.1.0a14`
 - PyPI name confirmed available: 2026-04-19
 - Target repo       : `github.com/NitMatGeo/databricks-excel-ingest-framework`

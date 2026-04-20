@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.0a14] — 2026-04-20
+
+### Fixed
+- **SyntaxError in `guide()`** (`framework.py`): `spark.sql(f"""...""")` inside the
+  triple-quoted guide string closed the outer string early. Replaced with a single-line
+  `ddl = f"..."` assignment.
+- **Domain references removed** from all live code and docs — replaced with
+  FreshMart retail context (`order_id`, `product_name`, `store_name`, `orders_bronze`).
+  Affected: `framework.py` (docstring + guide), `metadata.py` (two docstrings),
+  `CLAUDE.md`, `README.md` (problem description + quick start).
+
 ## [0.1.0a13] — 2026-04-20
 
 ### Added

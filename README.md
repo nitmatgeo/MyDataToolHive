@@ -8,7 +8,7 @@
 
 Excel files from the real world are messy.
 
-Headers span multiple rows. Cells are merged. Column names vary across teams, regions, and time — "Emp ID", "Employee No.", "Staff Number" all mean the same thing. Files arrive password-protected, with hidden columns, or with sections separated by blank columns.
+Headers span multiple rows. Cells are merged. Column names vary across teams, regions, and time — "Order No.", "Ord ID", "Transaction Number" all mean the same thing. Files arrive password-protected, with hidden columns, or with sections separated by blank columns.
 
 When you're building a Databricks data pipeline that needs to ingest Excel files reliably — especially at scale, from multiple sources — this becomes a significant engineering problem every single time.
 
@@ -123,10 +123,10 @@ framework = ExcelIngestFramework(spark=spark)
 result = framework.ingest(
     file_path="/Volumes/my_catalog/my_schema/my_volume/data.xlsx",
     canonical_dict={
-        "employee_id": ["emp id", "staff no", "employee number"],
-        "first_name":  ["first name", "forename", "given name"],
-        "email":       ["email address", "e-mail", "email"],
-        "department":  ["dept", "department", "business unit"],
+        "order_id":     ["order no", "ord id", "transaction id"],
+        "product_name": ["product", "item name", "description"],
+        "store_name":   ["store", "retail unit", "shop name"],
+        "quantity":     ["qty", "units", "quantity"],
     },
 )
 
