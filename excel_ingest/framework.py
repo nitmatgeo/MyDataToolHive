@@ -352,23 +352,41 @@ OTHER METHODS
         pkg_dir = os.path.dirname(os.path.abspath(__file__))
         bundled = os.path.join(pkg_dir, "sample_usage")
 
+        import shutil
+
+        def _copy_if_newer(src: str, dst: str) -> bool:
+            src_mtime = os.path.getmtime(src)
+            dst_mtime = os.path.getmtime(dst) if os.path.exists(dst) else 0
+            if src_mtime > dst_mtime:
+                shutil.copy2(src, dst)
+                return True
+            return False
+
         copied: List[str] = []
         if os.path.isdir(bundled):
+            # Copy top-level notebook files
             for fname in sorted(os.listdir(bundled)):
                 src = os.path.join(bundled, fname)
-                dst = os.path.join(dest, fname)
                 if not os.path.isfile(src):
                     continue
-                src_mtime = os.path.getmtime(src)
-                dst_mtime = os.path.getmtime(dst) if os.path.exists(dst) else 0
-                if src_mtime > dst_mtime:
-                    import shutil
-                    shutil.copy2(src, dst)
+                if _copy_if_newer(src, os.path.join(dest, fname)):
                     copied.append(fname)
 
+            # Copy samples/ subfolder (Excel files)
+            samples_src = os.path.join(bundled, "samples")
+            samples_dst = os.path.join(dest, "samples")
+            if os.path.isdir(samples_src):
+                os.makedirs(samples_dst, exist_ok=True)
+                for fname in sorted(os.listdir(samples_src)):
+                    src = os.path.join(samples_src, fname)
+                    if not os.path.isfile(src):
+                        continue
+                    if _copy_if_newer(src, os.path.join(samples_dst, fname)):
+                        copied.append(f"samples/{fname}")
+
         if copied:
-            print(f"Extracted {len(copied)} notebook(s) to: {dest}")
+            print(f"Extracted {len(copied)} file(s) to: {dest}")
         else:
-            print(f"Sample notebooks already up-to-date at: {dest}")
+            print(f"Sample files already up-to-date at: {dest}")
 
         return dest
