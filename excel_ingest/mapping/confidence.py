@@ -52,7 +52,9 @@ class RuleScore:
 class CanonicalMapping:
     file_id: str
     column_index: int
+    column_letter: str
     hierarchical_header: str
+    bronze_column_name: str
     canonical_field: Optional[str]
     mapping_status: MappingStatus
     mapping_method: MappingMethod
@@ -65,7 +67,9 @@ class CanonicalMapping:
         return {
             "file_id":             self.file_id,
             "column_index":        self.column_index,
+            "column_letter":       self.column_letter,
             "hierarchical_header": self.hierarchical_header,
+            "bronze_column_name":  self.bronze_column_name,
             "canonical_field":     self.canonical_field,
             "mapping_status":      self.mapping_status.value,
             "status_description":  self.mapping_status.description,

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from openpyxl.utils import get_column_letter
 
@@ -15,6 +17,7 @@ class ColumnMetadata:
     column_index: int                      # 1-based
     column_letter: str
     hierarchical_header: str               # "[Parent].[Child]" or "[Header]"
+    bronze_column_name: str                # unique SQL-safe Delta column name
     raw_header_texts: List[Optional[str]]  # one entry per header row
     section_id: int                        # partition by blank separator columns
     is_blank_column: bool
@@ -68,6 +71,7 @@ class MetadataExtractionResult:
                 "col_index":           c.column_index,
                 "col_letter":          c.column_letter,
                 "hierarchical_header": c.hierarchical_header,
+                "bronze_column_name":  c.bronze_column_name,
                 "column_group":        c.section_id,
                 "is_blank":            c.is_blank_column,
                 "is_hidden":           c.is_hidden_column,
@@ -107,6 +111,7 @@ class MetadataExtractionResult:
                 "column_index":        c.column_index,
                 "column_letter":       c.column_letter,
                 "hierarchical_header": c.hierarchical_header,
+                "bronze_column_name":  c.bronze_column_name,
                 "section_id":          c.section_id,
                 "is_blank_column":     c.is_blank_column,
                 "is_hidden_column":    c.is_hidden_column,
@@ -162,6 +167,70 @@ def _get_horizontal_merge_value(row_idx: int, col_idx: int, merged_cells: List[M
     return None
 
 
+def _sanitise_level(text: str) -> str:
+    """Sanitise one hierarchy level into a SQL-safe identifier fragment.
+
+    Rules applied in order:
+      & → and  |  % → pct  |  all other non-alphanumeric → _
+      squeeze consecutive _ → single _  |  strip leading/trailing _
+      prefix col_ if result starts with a digit
+    """
+    text = text.lower()
+    text = text.replace("&", "and")
+    text = text.replace("%", "pct")
+    text = re.sub(r"[^a-z0-9]", "_", text)
+    text = re.sub(r"_+", "_", text)
+    text = text.strip("_")
+    if not text:
+        return "col"
+    if text[0].isdigit():
+        return f"col_{text}"
+    return text
+
+
+def _assign_bronze_names(hier_headers: List[str]) -> List[str]:
+    """Generate unique SQL-safe bronze column names from a list of hierarchical headers.
+
+    Strategy:
+      1. Use leaf segment only when it is unique across the sheet.
+      2. Escalate duplicated leaves to the full path (all levels joined with __).
+      3. If full-path duplicates still exist (same header repeated verbatim),
+         append _N (1-based occurrence) as a final fallback.
+
+    Hierarchy levels are separated by __ (double underscore) to distinguish them
+    from single _ used within a level name. Dots are not used because Delta column
+    names with dots require backtick-quoting everywhere in SQL.
+    """
+    all_parts: List[List[str]] = []
+    for header in hier_headers:
+        raw_parts = re.findall(r"\[([^\]]+)\]", header)
+        sanitised = [_sanitise_level(p) for p in raw_parts] if raw_parts else ["col"]
+        all_parts.append(sanitised)
+
+    # Attempt 1: leaf only
+    names: List[str] = [p[-1] for p in all_parts]
+
+    # Escalate duplicated leaves to full path
+    counts = Counter(names)
+    dupes = {n for n, c in counts.items() if c > 1}
+    if dupes:
+        names = [
+            "__".join(p) if names[i] in dupes else names[i]
+            for i, p in enumerate(all_parts)
+        ]
+
+    # Final fallback: append occurrence index for any remaining collisions
+    counts = Counter(names)
+    if any(v > 1 for v in counts.values()):
+        occurrence: Dict[str, int] = {}
+        for i, name in enumerate(names):
+            if counts[name] > 1:
+                occurrence[name] = occurrence.get(name, 0) + 1
+                names[i] = f"{name}_{occurrence[name]}"
+
+    return names
+
+
 def combine_column_records(results: List[MetadataExtractionResult]) -> List[Dict[str, Any]]:
     """Flatten column_records() from a list of MetadataExtractionResult into one list.
 
@@ -199,12 +268,11 @@ def extract_metadata(
     total_cols = structure.total_cols
 
     section_ids = _assign_section_ids(total_cols, structure.blank_column_indices)
-
-    columns: List[ColumnMetadata] = []
     header_rows = header_struct.header_row_indices if header_struct else []
 
+    # First pass: collect hierarchical headers and per-column data
+    intermediates: List[Tuple[int, List[Optional[str]], str, bool, int]] = []
     for col_idx in range(1, total_cols + 1):
-        letter = get_column_letter(col_idx)
         raw_texts: List[Optional[str]] = []
         if header_struct:
             for row_idx in header_rows:
@@ -220,12 +288,20 @@ def extract_metadata(
         hier = _build_hierarchical_header(raw_texts)
         in_merge = any(m.min_col <= col_idx <= m.max_col for m in merged)
         span = _merge_span_for_col(col_idx, merged)
+        intermediates.append((col_idx, raw_texts, hier, in_merge, span))
 
+    # Generate bronze column names — needs all headers together for uniqueness resolution
+    bronze_names = _assign_bronze_names([x[2] for x in intermediates])
+
+    # Second pass: build ColumnMetadata with bronze_column_name assigned
+    columns: List[ColumnMetadata] = []
+    for (col_idx, raw_texts, hier, in_merge, span), bronze_name in zip(intermediates, bronze_names):
         columns.append(
             ColumnMetadata(
                 column_index=col_idx,
-                column_letter=letter,
+                column_letter=get_column_letter(col_idx),
                 hierarchical_header=hier,
+                bronze_column_name=bronze_name,
                 raw_header_texts=raw_texts,
                 section_id=section_ids[col_idx - 1],
                 is_blank_column=(col_idx in blank_cols),

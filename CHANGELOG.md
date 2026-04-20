@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.1.0a12] — 2026-04-20
+
+### Added
+- **`ColumnMetadata.bronze_column_name`** (`metadata.py`): unique, SQL-safe Delta column name
+  generated from the hierarchical header during Stage 3. Strategy: leaf segment only when
+  unique across the sheet; escalates to full path (levels joined with `__`) for duplicates;
+  appends `_N` as a last-resort fallback for verbatim-repeated headers.
+- **`_sanitise_level()`** (`metadata.py`): sanitises one hierarchy level to an identifier
+  fragment. Rules: `&`→`and`, `%`→`pct`, all other non-alphanumeric→`_`, squeeze/strip
+  underscores, prefix `col_` if the result starts with a digit.
+- **`_assign_bronze_names()`** (`metadata.py`): two-pass function that resolves uniqueness
+  across all columns in a sheet before assigning final names.
+- **`bronze_column_name` in `column_records()` and `to_delta_records()`** (`metadata.py`):
+  both output methods now include the bronze column name so callers have the complete
+  bronze schema in one place.
+- **`CanonicalMapping.column_letter`** (`mapping/confidence.py`): Excel column letter added
+  to the mapping dataclass and `to_dict()` output — completes the column identity alongside
+  `column_index`, `hierarchical_header`, and `bronze_column_name`.
+- **`CanonicalMapping.bronze_column_name`** (`mapping/confidence.py`): the bronze column name
+  flows through to the mapping output so the `mapping_records()` DataFrame is the single
+  table a developer needs: Excel column → bronze name → canonical field → status.
+
+### Architecture clarification
+- **Bronze = as-is file structure**: the framework's job ends at producing the bronze schema
+  (`bronze_column_name`) and the mapping spec (`bronze_column_name → canonical_field`).
+  Silver-layer concerns (unpivoting, renaming, merging duplicate section columns) are
+  intentionally out of scope — handled by the developer downstream.
+- **`canonical_field` name kept** (not `db_canonical_field`): the field name is not
+  database-specific; the framework does not own persistence.
+
 ## [0.1.0a11] — 2026-04-20
 
 ### Added
