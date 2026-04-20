@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "databricks-excel-ingest-framework"
-version = "0.1.0a4"
+version = "0.1.0a5"
 description = "Databricks-native Excel ingestion framework: validate, detect structure, extract metadata, and map columns to canonical fields"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -16,6 +16,7 @@ keywords = [
 
 dependencies = [
     "openpyxl>=3.0.0",
+    "msoffcrypto-tool>=5.0.0",
 ]
 
 [project.optional-dependencies]

@@ -74,8 +74,8 @@ def _check_file_existence(
                 size = ls_result[0].size if ls_result else None
                 msgs.append(f"File found via dbutils.fs.ls: {file_path}")
                 return True, size, msgs
-        except Exception:
-            pass
+        except Exception as exc:
+            msgs.append(f"dbutils.fs.ls failed ({exc}); falling back to OS path check.")
         # Fallback: DBFS paths are also accessible via /dbfs/ mount
         local_path = file_path.replace("dbfs:/", "/dbfs/") if file_path.startswith("dbfs:/") else file_path
         if os.path.exists(local_path):
@@ -121,6 +121,12 @@ def _read_workbook(file_path: str, password: Optional[str]):
         # Re-raises only when msoffcrypto confirms a wrong-password failure.
         try:
             import msoffcrypto
+        except ImportError:
+            raise ImportError(
+                "msoffcrypto-tool is required to open AES-encrypted Excel files. "
+                "Run: pip install msoffcrypto-tool"
+            )
+        try:
             with open(local_path, "rb") as f:
                 office_file = msoffcrypto.OfficeFile(f)
                 office_file.load_key(password=password)
@@ -128,8 +134,6 @@ def _read_workbook(file_path: str, password: Optional[str]):
                 office_file.decrypt(decrypted)
             decrypted.seek(0)
             return openpyxl.load_workbook(decrypted, read_only=True, data_only=True)
-        except ImportError:
-            pass
         except Exception as exc:
             msg = str(exc).lower()
             if "password" in msg or "decrypt" in msg:
@@ -160,6 +164,9 @@ def _check_password_and_sheets(
         wb.close()
         msgs.append(f"Workbook readable — {len(sheets)} sheet(s) found.")
         return True, False, sheets, active_name, msgs
+    except ImportError as exc:
+        msgs.append(str(exc))
+        return False, False, [], None, msgs
     except Exception as exc:
         msg = str(exc).lower()
         if "password" in msg or "encrypted" in msg or "decrypt" in msg:
@@ -184,8 +191,8 @@ def _get_dbutils():
         ip = IPython.get_ipython()
         if ip and "dbutils" in ip.user_ns:
             return ip.user_ns["dbutils"]
-    except Exception:
-        pass
+    except ImportError:
+        pass  # IPython not installed — not in a Databricks/Jupyter environment
     return None
 
 

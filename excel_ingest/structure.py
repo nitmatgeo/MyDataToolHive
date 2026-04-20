@@ -184,9 +184,15 @@ def analyze_excel_structure(
     msgs: List[str] = []
 
     if password is not None:
-        _use_kwarg = False
         try:
             import io, msoffcrypto
+        except ImportError:
+            raise ImportError(
+                "msoffcrypto-tool is required to open AES-encrypted Excel files. "
+                "Run: pip install msoffcrypto-tool"
+            )
+        _use_kwarg = False
+        try:
             with open(local_path, "rb") as f:
                 office_file = msoffcrypto.OfficeFile(f)
                 office_file.load_key(password=password)
@@ -194,8 +200,6 @@ def analyze_excel_structure(
                 office_file.decrypt(decrypted)
             decrypted.seek(0)
             wb = load_workbook(decrypted, read_only=False, data_only=True)
-        except ImportError:
-            _use_kwarg = True
         except Exception as exc:
             msg = str(exc).lower()
             if "password" in msg or "decrypt" in msg:

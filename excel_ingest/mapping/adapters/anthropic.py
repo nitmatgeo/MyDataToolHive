@@ -80,9 +80,9 @@ def _parse_llm_json(raw: str) -> LLMResponse:
             reasoning=data.get("reasoning", ""),
             raw_response=raw,
         )
-    except Exception:
+    except Exception as exc:
         return LLMResponse(
             canonical_field=None, confidence=0.0,
-            reasoning="Could not parse LLM response.",
+            reasoning=f"Could not parse LLM response: {exc}",
             raw_response=raw,
         )

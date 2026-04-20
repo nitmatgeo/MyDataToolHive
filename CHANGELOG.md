@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.0a5] — 2026-04-20
+
+### Fixed
+- **Explicit ImportError for missing `msoffcrypto-tool`** (`validation.py`, `structure.py`): if the
+  package is somehow absent, the error now reads
+  `"msoffcrypto-tool is required to open AES-encrypted Excel files. Run: pip install msoffcrypto-tool"`
+  instead of a cryptic openpyxl fallback failure.
+- **`ImportError` routed separately in `_check_password_and_sheets`**: previously a missing-package
+  error could be misclassified as a wrong-password error. Now surfaces its own message.
+
 ## [0.1.0a4] — 2026-04-20
 
 ### Fixed
@@ -16,6 +26,8 @@
   Excel files are bundled in the wheel.
 - **`openpyxl` dependency**: removed `--no-deps` install flag; `openpyxl` is now correctly
   installed as a declared dependency.
+- **`msoffcrypto-tool` added as a base dependency**: required for file-level AES decryption.
+  Without it, `password=` on AES-encrypted files fails silently with openpyxl's fallback.
 
 ### Changed
 - **Sample notebooks (01–05)** rebuilt as FreshMart retail data demo:
