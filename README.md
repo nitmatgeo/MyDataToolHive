@@ -91,23 +91,23 @@ Use this framework when:
 
 ```bash
 # Core only (no LLM)
-pip install databricks-excel-ingest-framework==0.1.0a1
+pip install databricks-excel-ingest-framework
 
 # With Databricks Foundation Models
-pip install "databricks-excel-ingest-framework[databricks]==0.1.0a1"
+pip install "databricks-excel-ingest-framework[databricks]"
 
 # With OpenAI or Anthropic
-pip install "databricks-excel-ingest-framework[openai]==0.1.0a1"
-pip install "databricks-excel-ingest-framework[anthropic]==0.1.0a1"
+pip install "databricks-excel-ingest-framework[openai]"
+pip install "databricks-excel-ingest-framework[anthropic]"
 
 # All adapters
-pip install "databricks-excel-ingest-framework[all]==0.1.0a1"
+pip install "databricks-excel-ingest-framework[all]"
 ```
 
 In a Databricks notebook:
 
 ```python
-%pip install "databricks-excel-ingest-framework[databricks]==0.1.0a1"
+%pip install "databricks-excel-ingest-framework[databricks]"
 dbutils.library.restartPython()
 ```
 

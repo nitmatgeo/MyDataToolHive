@@ -1,8 +1,29 @@
 # Changelog
 
-## [0.1.0a5] — 2026-04-20
+## [0.1.0a7] — 2026-04-20
+
+### Added
+- **`FileStructureMetadata.header_range`** (`structure.py`): new property returning the header rows
+  as an Excel A1-notation range string, e.g. `"A1:L1"` (single header) or `"A1:N2"` (multi-row).
+  Returns `None` when no headers are detected.
+- **`FileStructureMetadata.data_range`** (`structure.py`): new property returning the data rows as
+  an Excel A1-notation range string, e.g. `"A2:L21"`. Returns `None` when there are no data rows.
 
 ### Fixed
+- **Header auto-detection rewritten** (`structure.py`): previous algorithm stopped only on
+  population gaps — failing on dense data where both header and data rows are >30 % full. New
+  algorithm adds a data-type check (`_row_is_data`): a row containing >35 % numeric, date, or
+  structured-ID cells (e.g. `ORD-xxxx`) is classified as a data row and stops the header scan.
+  Single-header files no longer require `static_header_rows=[1]` hints.
+- **Low-confidence warning**: when auto-detection exhausts `max_rows_to_scan` without finding a
+  clear data boundary, a warning is added to `FileStructureMetadata.messages` advising the user to
+  set `static_header_rows` in `FileProcessingConfig`.
+- **`dbutils.fs.ls` silent swallow** (`validation.py`): failure now appended to messages instead
+  of silently caught.
+- **`_get_dbutils()` exception scope** (`validation.py`): narrowed from `except Exception` to
+  `except ImportError` — only IPython-not-installed is expected; other errors now propagate.
+- **LLM `_parse_llm_json` error detail** (all three adapters): `"Could not parse LLM response."`
+  now includes `str(exc)` so the specific parse error (missing key, wrong type, etc.) is visible.
 - **Explicit ImportError for missing `msoffcrypto-tool`** (`validation.py`, `structure.py`): if the
   package is somehow absent, the error now reads
   `"msoffcrypto-tool is required to open AES-encrypted Excel files. Run: pip install msoffcrypto-tool"`

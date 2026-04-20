@@ -124,6 +124,8 @@ for cfg in FILE_CONFIGS:
     print(f"       Merged regions : {len(s.merged_cells)}")
     print(f"       Blank columns  : {s.blank_column_indices or 'none'}")
     print(f"       Hidden columns : {s.hidden_column_indices or 'none'}")
+    print(f"       Header range   : {s.header_range or 'none'}")
+    print(f"       Data range     : {s.data_range or 'none'}")
     if s.messages:
         print(f"       Info           : {s.messages[-1]}")
     print()

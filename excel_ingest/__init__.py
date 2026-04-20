@@ -21,7 +21,11 @@ Quick start::
     framework = ExcelIngestFramework(spark=spark)
     result = framework.ingest(
         file_path="/Volumes/catalog/schema/volume/data.xlsx",
-        canonical_dict={"employee_id": ["emp id", "staff no"], ...},
+        canonical_dict={
+            "order_id":       ["order id", "order no", "transaction id"],
+            "product_name":   ["product name", "item name", "description"],
+            "store_name":     ["store name", "store", "retail unit"],
+        },
     )
 """
 
@@ -50,4 +54,4 @@ try:
     from importlib.metadata import version as _pkg_version
     __version__ = _pkg_version("databricks-excel-ingest-framework")
 except Exception:
-    __version__ = "0.1.0a1"
+    __version__ = "unknown"

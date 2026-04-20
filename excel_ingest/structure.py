@@ -56,6 +56,26 @@ class FileStructureMetadata:
     data_row_count: int
     messages: List[str] = field(default_factory=list)
 
+    @property
+    def header_range(self) -> Optional[str]:
+        """Excel A1-notation range covering all header rows, e.g. 'A1:L2'. None if no headers."""
+        if not self.header_structure or not self.header_structure.header_row_indices:
+            return None
+        last_col = get_column_letter(self.total_cols) if self.total_cols else "A"
+        first_row = self.header_structure.header_row_indices[0]
+        last_row  = self.header_structure.header_row_indices[-1]
+        return f"A{first_row}:{last_col}{last_row}"
+
+    @property
+    def data_range(self) -> Optional[str]:
+        """Excel A1-notation range covering all data rows, e.g. 'A2:L21'. None if no data."""
+        if not self.header_structure or self.data_row_count == 0:
+            return None
+        last_col  = get_column_letter(self.total_cols) if self.total_cols else "A"
+        first_row = self.header_structure.data_start_row
+        last_row  = self.total_rows
+        return f"A{first_row}:{last_col}{last_row}"
+
 
 @dataclass
 class FileProcessingConfig:
