@@ -56,6 +56,16 @@
   fully self-contained in the DataFrame columns (`mapping_status`, `status_description`,
   `requires_action`).
 
+### Fixed
+- **Rule-based alias matching** (`mapping/confidence.py`): matching previously ran against
+  the full flattened hierarchical path (e.g. `"transaction & customer  customer identity
+  customer name"`), causing false positives — `"customer id"` is a substring of
+  `"customer identity"` and incorrectly won over the correct `"customer name"` match.
+  New helper `_extract_leaf()` extracts the last `[…]` segment; matching now runs only
+  against the leaf (most specific column label). Exact alias match weight raised from
+  `0.4` to `0.6` so it outscores partial substring matches (e.g. `"customer"` in
+  `"customer segment"`) and the correct canonical field wins in tie situations.
+
 ## [0.1.0a10] — 2026-04-20
 
 ### Added
