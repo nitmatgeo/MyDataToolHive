@@ -9,9 +9,17 @@ from excel_ingest.utils.paths import FileLocationType, detect_location_type
 
 
 class ValidationStatus(Enum):
-    PASSED = "PASSED"
+    PASSED  = "PASSED"
     WARNING = "WARNING"
-    FAILED = "FAILED"
+    FAILED  = "FAILED"
+
+    @property
+    def description(self) -> str:
+        return {
+            "PASSED":  "File is valid, readable, and all sheets are accessible.",
+            "WARNING": "File is readable but has one or more hidden sheets — review if intentional.",
+            "FAILED":  "File could not be validated. Check the errors field for details.",
+        }[self.value]
 
 
 @dataclass
@@ -50,6 +58,24 @@ class FileValidationResult:
     @property
     def all_sheet_names(self) -> List[str]:
         return [s.name for s in self.sheets]
+
+    def summary_record(self, label: str = "") -> dict:
+        """Flat dict for Spark DataFrame display — one row per file."""
+        return {
+            "label":                 label,
+            "file":                  os.path.basename(self.file_path),
+            "status":                self.status.value,
+            "status_description":    self.status.description,
+            "file_exists":           self.file_exists,
+            "format_type":           self.format_type or "",
+            "file_size_bytes":       self.file_size_bytes or 0,
+            "is_readable":           self.is_readable,
+            "is_password_protected": self.is_password_protected,
+            "total_sheets":          self.total_sheets,
+            "visible_sheets":        str(self.visible_sheet_names),
+            "warnings":              str(self.warnings) if self.warnings else "",
+            "errors":                str(self.errors)   if self.errors   else "",
+        }
 
 
 # ---------------------------------------------------------------------------

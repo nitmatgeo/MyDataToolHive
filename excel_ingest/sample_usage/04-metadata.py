@@ -60,29 +60,24 @@ FILE_CONFIGS = [
 # COMMAND ----------
 
 # DBTITLE 1,Extract Metadata for Each File
+# One summary row per file — file identity, layout stats, and header signature.
+# total_loadable_cols excludes blank separator columns (those carry no data).
+# Full per-column detail is in the "Full Column Listing" cell below.
 
-all_metadata = []
+all_metadata       = []
+all_file_summaries = []
 
 for cfg in FILE_CONFIGS:
     path      = f"{VOLUME_PATH}/{cfg['file']}"
     structure = framework.detect_structure(path, config=cfg["config"], password=cfg["password"])
     metadata  = framework.extract_metadata(path, structure, file_id=cfg["id"])
-
     all_metadata.append(metadata)
-    fm = metadata.file_metadata
 
-    print(f"[{cfg['id']}] {cfg['file']}  |  sheet: {structure.sheet_name}")
-    print(f"       Signature    : {fm.header_signature[:24]}...")
-    print(f"       Sections     : {fm.num_sections}")
-    print(f"       Total cols   : {len(metadata.column_metadata)}")
-    print(f"       Merged       : {fm.num_merged_regions}")
-    print()
-    for col in metadata.column_metadata[:6]:    # first 6 columns only
-        flags = ("BLANK " if col.is_blank_column else "") + ("MERGE " if col.is_part_of_merge else "")
-        print(f"         col {col.column_index:>3} ({col.column_letter})  sec={col.section_id}  {flags}{col.hierarchical_header}")
-    if len(metadata.column_metadata) > 6:
-        print(f"         ... {len(metadata.column_metadata) - 6} more columns")
-    print()
+    summary = metadata.file_metadata.to_dict()
+    summary["total_loadable_cols"] = len([c for c in metadata.column_metadata if not c.is_blank_column])
+    all_file_summaries.append(summary)
+
+display(spark.createDataFrame(all_file_summaries))
 
 # COMMAND ----------
 
@@ -127,10 +122,7 @@ for rec in ms_sheet_records:
     rec["schema_group"]      = anchor
     rec["is_header_unique"]  = anchor == rec["sheet_name"]
 
-print("Sheet summary:")
 display(spark.createDataFrame(ms_sheet_records))
-
-print("Column listing:")
 display(spark.createDataFrame(ms_col_records))
 
 # COMMAND ----------
@@ -145,9 +137,9 @@ display(spark.createDataFrame([m.signature_record() for m in all_metadata]))
 # COMMAND ----------
 
 # DBTITLE 1,Bronze Schema for a Single File
-# bronze_schema() returns {db_canonical_bronze_column_name: column_index} for all
-# non-blank columns. This is the map you need to know which Excel column (by index)
-# loads into which Delta column (by name).
+# Shows every loadable column with its Excel position, original header, and the
+# SQL-safe Delta column name it will land under in the bronze table.
+# Blank separator columns are excluded — they carry no data.
 #
 # db_canonical_bronze_column_name rules:
 #   - Leaf header used when unique across the sheet  →  customer_name
@@ -155,11 +147,17 @@ display(spark.createDataFrame([m.signature_record() for m in all_metadata]))
 #   - & → and  |  % → pct  |  spaces / special chars → _
 
 s12_meta = all_metadata[-1]   # S12 — wide 3-level merged headers, 45 cols
-schema   = s12_meta.bronze_schema()
 
-print(f"S12 bronze schema — {len(schema)} loadable columns:\n")
-for col_name, col_idx in sorted(schema.items(), key=lambda x: x[1]):
-    print(f"  col {col_idx:>3}  →  {col_name}")
+display(spark.createDataFrame([
+    {
+        "column_index":                  c.column_index,
+        "column_letter":                 c.column_letter,
+        "hierarchical_header":           c.hierarchical_header,
+        "db_canonical_bronze_column_name": c.db_canonical_bronze_column_name,
+    }
+    for c in s12_meta.column_metadata
+    if not c.is_blank_column
+]))
 
 # COMMAND ----------
 
@@ -173,9 +171,7 @@ for col_name, col_idx in sorted(schema.items(), key=lambda x: x[1]):
 
 all_cols = build_superset_schema(all_metadata)
 
-print(f"Superset schema across all 12 sample files — {len(all_cols)} distinct columns:\n")
-for c in all_cols:
-    print(f"  {c}")
+display(spark.createDataFrame([{"db_canonical_bronze_column_name": c} for c in all_cols]))
 
 # COMMAND ----------
 

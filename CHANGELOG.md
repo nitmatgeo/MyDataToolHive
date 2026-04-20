@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.1.0a15] — 2026-04-21
+
+### Added
+- **`ValidationStatus.description`** (`validation.py`): plain-English property on the enum,
+  consistent with `FileStatus.description` and `MappingStatus.description`. Values: PASSED,
+  WARNING, FAILED each carry a self-explanatory sentence.
+- **`FileValidationResult.summary_record(label="")`** (`validation.py`): flat dict for Spark
+  DataFrame display — one row per file. Fields: label, file, status, status_description,
+  file_exists, format_type, file_size_bytes, is_readable, is_password_protected, total_sheets,
+  visible_sheets, warnings, errors.
+- **`FileStructureMetadata.summary_record(file_path="", label="")`** (`structure.py`): flat
+  dict for Spark DataFrame display — one row per file/sheet. Fields: label, file, sheet_name,
+  status, status_description, is_actionable, total_rows, total_cols, data_row_count,
+  header_rows, header_range, data_range, merged_regions, blank_columns, hidden_columns.
+
+### Changed
+- **`02-validate.py`**: fully converted from `print()` to `display(spark.createDataFrame(...))`.
+  Added "Validation Status Reference" cell (status enum table). "Validate Each File" and
+  "Negative Examples" now use `summary_record()`. "Summary by Status" is a grouped DataFrame.
+- **`03-structure.py`**: "Detect Structure for Each File" converted to DataFrame using
+  `summary_record()`. Added "Files Needing Action" filter cell (`is_actionable = true`).
+  Removed unused `FileStatus` import.
+- **`04-metadata.py`**: "Extract Metadata for Each File" print loop replaced with DataFrame
+  (`file_metadata.to_dict()` + `total_loadable_cols`). "Bronze Schema for a Single File"
+  enriched to show `column_letter` and `hierarchical_header` alongside
+  `db_canonical_bronze_column_name` so Excel origin is never ambiguous. "Superset Schema"
+  and "Multi-Sheet Iteration" print calls removed. "Verify — List Files in Volume"
+  (`01-install.py`) converted to DataFrame.
+
 ## [0.1.0a14] — 2026-04-20
 
 ### Fixed

@@ -69,7 +69,7 @@ print(f"\nDone.")
 # COMMAND ----------
 
 # DBTITLE 1,Verify — List Files in Volume
-print(f"Files in {VOLUME_PATH}:\n")
-for f in sorted(os.listdir(VOLUME_PATH)):
-    size = os.path.getsize(f"{VOLUME_PATH}/{f}")
-    print(f"  {f:<58}  {size:>8,} bytes")
+display(spark.createDataFrame([
+    {"file": f, "size_bytes": os.path.getsize(f"{VOLUME_PATH}/{f}")}
+    for f in sorted(os.listdir(VOLUME_PATH))
+]))

@@ -23,7 +23,7 @@ VOLUME_PATH   = f"/Volumes/{MY_CATALOG}/{INGEST_SCHEMA}/{VOLUME_NAME}"
 
 # DBTITLE 1,Initialise Framework
 from excel_ingest import ExcelIngestFramework
-from excel_ingest.structure import FileProcessingConfig, FileStatus
+from excel_ingest.structure import FileProcessingConfig
 
 framework = ExcelIngestFramework(spark=spark)
 
@@ -105,28 +105,23 @@ FILE_CONFIGS = [
 # COMMAND ----------
 
 # DBTITLE 1,Detect Structure for Each File
+# One row per file — sortable, filterable, consistent with later stages.
+# status_description explains what was found; is_actionable = True means the pipeline
+# cannot proceed — reconfigure FileProcessingConfig and re-run.
+
+all_structure = []
 
 for cfg in FILE_CONFIGS:
     path = f"{VOLUME_PATH}/{cfg['file']}"
     s    = framework.detect_structure(path, config=cfg["config"], password=cfg["password"])
+    all_structure.append(s.summary_record(file_path=cfg["file"], label=cfg["label"]))
 
-    status_icon = "OK"   if s.status == FileStatus.VALID else (
-                  "WARN" if s.status.is_actionable       else "INFO")
+display(spark.createDataFrame(all_structure))
 
-    print(f"[{status_icon}] {cfg['label']}")
-    print(f"       File               : {cfg['file']}")
-    print(f"       Sheet              : {s.sheet_name}")
-    print(f"       Status             : {s.status.value}")
-    print(f"       Status Description : {s.status.description}")
-    print(f"       Dimensions         : {s.total_rows} rows x {s.total_cols} cols")
-    print(f"       Header Rows        : {s.header_structure.header_row_indices if s.header_structure else 'none detected'}")
-    print(f"       Data Starts        : row {s.header_structure.data_start_row if s.header_structure else 'N/A'}")
-    print(f"       Data Rows          : {s.data_row_count}")
-    print(f"       Merged Regions     : {len(s.merged_cells)}")
-    print(f"       Blank Columns      : {s.blank_column_indices or 'none'}")
-    print(f"       Hidden Columns     : {s.hidden_column_indices or 'none'}")
-    print(f"       Header Range       : {s.header_range or 'none'}")
-    print(f"       Data Range         : {s.data_range or 'none'}")
-    if s.messages:
-        print(f"       Info               : {s.messages[-1]}")
-    print()
+# COMMAND ----------
+
+# DBTITLE 1,Files Needing Action
+# Rows where is_actionable = True must be resolved before metadata extraction can proceed.
+# Read status_description for the recommended fix.
+
+spark.createDataFrame(all_structure).filter("is_actionable = true").display()

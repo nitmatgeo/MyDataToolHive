@@ -96,6 +96,37 @@ class FileStructureMetadata:
         last_row  = self.total_rows
         return f"A{first_row}:{last_col}{last_row}"
 
+    def summary_record(self, file_path: str = "", label: str = "") -> dict:
+        """Flat dict for Spark DataFrame display — one row per file/sheet.
+
+        Pass ``file_path`` and ``label`` from the caller's FILE_CONFIGS entry so the
+        DataFrame row is self-contained without needing a join back to the config list::
+
+            records = [
+                framework.detect_structure(path, config=cfg["config"])
+                          .summary_record(file_path=cfg["file"], label=cfg["label"])
+                for cfg in FILE_CONFIGS
+            ]
+            display(spark.createDataFrame(records))
+        """
+        return {
+            "label":              label,
+            "file":               file_path,
+            "sheet_name":         self.sheet_name,
+            "status":             self.status.value,
+            "status_description": self.status.description,
+            "is_actionable":      self.status.is_actionable,
+            "total_rows":         self.total_rows,
+            "total_cols":         self.total_cols,
+            "data_row_count":     self.data_row_count,
+            "header_rows":        str(self.header_structure.header_row_indices if self.header_structure else []),
+            "header_range":       self.header_range or "",
+            "data_range":         self.data_range or "",
+            "merged_regions":     len(self.merged_cells),
+            "blank_columns":      str(self.blank_column_indices) if self.blank_column_indices else "",
+            "hidden_columns":     str(self.hidden_column_indices) if self.hidden_column_indices else "",
+        }
+
 
 @dataclass
 class FileProcessingConfig:

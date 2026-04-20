@@ -2,8 +2,20 @@
 # MAGIC %md
 # MAGIC # 02 — Stage 1: Validate All Sample Files
 # MAGIC
-# MAGIC Runs `framework.validate()` against every sample file in the Volume and prints
-# MAGIC a structured result per file — existence, format, readability, sheets, warnings.
+# MAGIC Runs `framework.validate()` against every sample file in the Volume.
+# MAGIC One row per file — existence, format, readability, sheet counts, warnings, errors.
+# MAGIC
+# MAGIC **Key columns:**
+# MAGIC
+# MAGIC | Column | What it is |
+# MAGIC |---|---|
+# MAGIC | `status` | PASSED / WARNING / FAILED |
+# MAGIC | `status_description` | Plain-English explanation — no docs lookup needed |
+# MAGIC | `is_readable` | False means the pipeline cannot proceed |
+# MAGIC | `is_password_protected` | True means a password is required at every subsequent stage |
+# MAGIC | `visible_sheets` | Sheets the framework will auto-detect or let you pick from |
+# MAGIC | `warnings` | Non-blocking issues (e.g. hidden sheets present) |
+# MAGIC | `errors` | Blocking issues — resolve before continuing |
 
 # COMMAND ----------
 
@@ -21,9 +33,21 @@ VOLUME_PATH   = f"/Volumes/{MY_CATALOG}/{INGEST_SCHEMA}/{VOLUME_NAME}"
 # COMMAND ----------
 
 # DBTITLE 1,Initialise Framework
-from excel_ingest import ExcelIngestFramework, ValidationStatus
+from excel_ingest import ExcelIngestFramework
 
 framework = ExcelIngestFramework(spark=spark)
+
+# COMMAND ----------
+
+# DBTITLE 1,Validation Status Reference
+# What each status value means — shown once so the main table is self-explanatory.
+
+from excel_ingest import ValidationStatus
+
+display(spark.createDataFrame([
+    {"status": s.value, "description": s.description}
+    for s in ValidationStatus
+]))
 
 # COMMAND ----------
 
@@ -47,46 +71,29 @@ FILE_CONFIGS = [
 # COMMAND ----------
 
 # DBTITLE 1,Validate Each File
+# One row per file — sortable and filterable.
+# status_description explains the outcome; errors column shows what to fix for FAILED files.
 
-PASS  = "PASSED"
-WARN  = "WARNING"
-FAIL  = "FAILED"
-icons = {PASS: "OK", WARN: "WARN", FAIL: "FAIL"}
-
-results = []
+validation_records = []
 
 for cfg in FILE_CONFIGS:
     path = f"{VOLUME_PATH}/{cfg['file']}"
     r    = framework.validate(path, password=cfg["password"])
-    results.append((cfg["label"], r))
+    validation_records.append(r.summary_record(label=cfg["label"]))
 
-    icon = icons.get(r.status.value, "?")
-    print(f"[{icon}] {cfg['label']}")
-    print(f"       Status   : {r.status.value}")
-    print(f"       Format   : {r.format_type}  |  Size: {r.file_size_bytes:,} bytes" if r.file_size_bytes else f"       Format   : {r.format_type}")
-    print(f"       Sheets   : {r.all_sheet_names}")
-    if r.warnings:
-        print(f"       Warnings : {r.warnings}")
-    if r.errors:
-        print(f"       Errors   : {r.errors}")
-    print()
+display(spark.createDataFrame(validation_records))
 
 # COMMAND ----------
 
-# DBTITLE 1,Summary
+# DBTITLE 1,Summary by Status
+# WARNING = hidden sheets present (non-blocking). FAILED = cannot proceed — check errors.
 
-passed  = sum(1 for _, r in results if r.status.value == PASS)
-warned  = sum(1 for _, r in results if r.status.value == WARN)
-failed  = sum(1 for _, r in results if r.status.value == FAIL)
-
-print(f"Validated {len(results)} files:")
-print(f"  PASSED  : {passed}")
-print(f"  WARNING : {warned}   (hidden sheets — non-blocking)")
-print(f"  FAILED  : {failed}")
+spark.createDataFrame(validation_records).groupBy("status").count().orderBy("status").display()
 
 # COMMAND ----------
 
-# DBTITLE 1,Negative Examples — File Not Found / Invalid Path
+# DBTITLE 1,Negative Examples — File Not Found / Invalid Path / Wrong Password
+# Demonstrates what FAILED results look like for common error scenarios.
 
 NEGATIVE_CASES = [
     {"path": f"{VOLUME_PATH}/does_not_exist.xlsx",          "label": "File not found — path does not exist"},
@@ -97,16 +104,10 @@ NEGATIVE_CASES = [
     {"path": f"{VOLUME_PATH}/s11_password_protected.xlsx",  "label": "Encrypted — correct password (PASS)", "password": "Password1234"},
 ]
 
-print("Negative / error scenarios:\n")
+negative_records = []
+
 for case in NEGATIVE_CASES:
-    r    = framework.validate(case["path"], password=case.get("password"))
-    icon = icons.get(r.status.value, "?")
-    print(f"[{icon}] {case['label']}")
-    print(f"       Path     : {case['path']}")
-    print(f"       Status   : {r.status.value}")
-    print(f"       Exists   : {r.file_exists}")
-    if r.errors:
-        print(f"       Errors   : {r.errors}")
-    if r.warnings:
-        print(f"       Warnings : {r.warnings}")
-    print()
+    r = framework.validate(case["path"], password=case.get("password"))
+    negative_records.append(r.summary_record(label=case["label"]))
+
+display(spark.createDataFrame(negative_records))
