@@ -8,7 +8,7 @@
 # COMMAND ----------
 
 # DBTITLE 1,Install databricks-excel-ingest-framework
-%pip install databricks-excel-ingest-framework --upgrade --no-deps
+%pip install databricks-excel-ingest-framework --upgrade
 dbutils.library.restartPython()
 
 # COMMAND ----------
