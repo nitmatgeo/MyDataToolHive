@@ -33,16 +33,19 @@ framework = ExcelIngestFramework(spark=spark)
 # sheet_name=None  → auto-select (only works for single-sheet files)
 # static_header_rows → skip auto-detection when row numbers are known
 FILE_CONFIGS = [
+    # Auto-detect works for single-header-row files — no static_header_rows needed
     {"file": "s01_simple_single_sheet.xlsx",
      "label": "Simple single sheet",
      "password": None,
      "config": FileProcessingConfig()},
 
+    # Multi-row headers: provide static_header_rows so the framework knows all header rows
     {"file": "s02_multi_row_merged_headers.xlsx",
      "label": "Multi-row merged headers",
      "password": None,
      "config": FileProcessingConfig(sheet_name="Product Catalogue", static_header_rows=[1, 2])},
 
+    # No headers: data_start_row=1 tells the framework to treat everything as data
     {"file": "s03_no_headers.xlsx",
      "label": "No headers (raw data)",
      "password": None,
@@ -111,6 +114,7 @@ for cfg in FILE_CONFIGS:
                   "WARN" if s.status == FileStatus.NO_HEADERS else "INFO")
 
     print(f"[{status_icon}] {cfg['label']}")
+    print(f"       File           : {cfg['file']}")
     print(f"       Sheet          : {s.sheet_name}")
     print(f"       Status         : {s.status.value}")
     print(f"       Dimensions     : {s.total_rows} rows x {s.total_cols} cols")

@@ -107,31 +107,85 @@ def _detect_blank_and_hidden_columns(worksheet) -> Tuple[List[int], List[int]]:
     return blank_cols, hidden_cols
 
 
+def _row_is_data(row_values: list) -> bool:
+    """Return True when the row looks like data rather than a header label row.
+
+    A row is treated as data when more than 35 % of its non-empty cells are
+    numeric, date/time, or match a structured-ID pattern (e.g. ORD-xxxx,
+    CUST-1234).  Pure-text label rows (headers) score 0 % on this test.
+    """
+    import re, datetime
+    non_empty = [v for v in row_values if v is not None and str(v).strip() != ""]
+    if not non_empty:
+        return False
+    _ID_RE = re.compile(r"^[A-Z]{2,6}-[A-Z0-9]{2,}", re.IGNORECASE)
+    data_like = sum(
+        1 for v in non_empty
+        if isinstance(v, (int, float))
+        or isinstance(v, (datetime.datetime, datetime.date))
+        or (isinstance(v, str) and _ID_RE.match(v.strip()))
+    )
+    return (data_like / len(non_empty)) > 0.35
+
+
 def _detect_header_rows(
     worksheet,
     merged_cells: List[MergedCellInfo],
     config: FileProcessingConfig,
-) -> HeaderStructure:
+) -> Tuple[HeaderStructure, List[str]]:
+    """Returns (HeaderStructure, warning_messages).
+
+    Detection strategy (in priority order):
+    1. static_header_rows supplied → trust it, skip auto-detection.
+    2. data_start_row == 1 → no header rows (pure data sheet).
+    3. Auto-detect: scan rows until the first data-like row (type-based) or
+       the first blank gap after header rows are found (population-based).
+       If detection hits max_rows_to_scan without finding a clear boundary,
+       add a warning and fall back to row 1 as the single header row.
+    """
     max_col = worksheet.max_column or 1
     header_rows: List[int] = []
+    warnings: List[str] = []
 
     if config.static_header_rows:
         header_rows = sorted(config.static_header_rows)
+
+    elif config.data_start_row == 1:
+        header_rows = []  # caller explicitly said data starts at row 1 — no headers
+
     else:
         scan_limit = min(config.max_rows_to_scan, worksheet.max_row or 1)
+        hit_scan_limit = False
         for row_idx in range(1, scan_limit + 1):
             row_values = [worksheet.cell(row_idx, c).value for c in range(1, max_col + 1)]
-            non_empty = sum(1 for v in row_values if v is not None and str(v).strip() != "")
-            population = non_empty / max_col if max_col else 0
-            if population >= config.header_population_threshold:
-                header_rows.append(row_idx)
-            elif header_rows:
-                break  # first gap after headers found = end of header zone
+            non_empty_count = sum(1 for v in row_values if v is not None and str(v).strip() != "")
+            population = non_empty_count / max_col if max_col else 0
 
-    if not header_rows:
+            if population < config.header_population_threshold:
+                if header_rows:
+                    break  # blank gap after header zone — stop
+                continue   # leading blank row before headers
+
+            if _row_is_data(row_values):
+                break  # first data-like row = end of header zone
+
+            header_rows.append(row_idx)
+            if row_idx == scan_limit:
+                hit_scan_limit = True
+
+        if hit_scan_limit:
+            # Could not find a clear header/data boundary — fall back and warn
+            warnings.append(
+                f"Header auto-detection reached the scan limit ({scan_limit} rows) without "
+                f"finding a clear data boundary. Defaulting to row 1 as the only header row. "
+                f"If this is wrong, set static_header_rows in FileProcessingConfig."
+            )
+            header_rows = [1]
+
+    if not header_rows and config.data_start_row != 1:
         header_rows = [1]
 
-    data_start = config.data_start_row or (max(header_rows) + 1)
+    data_start = config.data_start_row or (max(header_rows) + 1 if header_rows else 1)
     raw_headers: Dict[int, List[Optional[str]]] = {}
     columns_per_row: Dict[int, int] = {}
     for r in header_rows:
@@ -145,7 +199,7 @@ def _detect_header_rows(
         data_start_row=data_start,
         columns_per_row=columns_per_row,
         raw_headers=raw_headers,
-    )
+    ), warnings
 
 
 def _count_visible_sheets(workbook) -> int:
@@ -238,7 +292,8 @@ def analyze_excel_structure(
 
     merged = _detect_merged_cells(ws)
     blank_cols, hidden_cols = _detect_blank_and_hidden_columns(ws)
-    header_struct = _detect_header_rows(ws, merged, config)
+    header_struct, detection_warnings = _detect_header_rows(ws, merged, config)
+    msgs.extend(detection_warnings)
 
     data_row_count = max(0, total_rows - header_struct.data_start_row + 1)
     if data_row_count == 0:

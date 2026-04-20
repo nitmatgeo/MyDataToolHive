@@ -59,8 +59,7 @@ for cfg in FILE_CONFIGS:
     all_metadata.append(metadata)
     fm = metadata.file_metadata
 
-    print(f"[{cfg['id']}] {cfg['file']}")
-    print(f"       Sheet        : {structure.sheet_name}")
+    print(f"[{cfg['id']}] {cfg['file']}  |  sheet: {structure.sheet_name}")
     print(f"       Signature    : {fm.header_signature[:24]}...")
     print(f"       Sections     : {fm.num_sections}")
     print(f"       Total cols   : {len(metadata.column_metadata)}")
