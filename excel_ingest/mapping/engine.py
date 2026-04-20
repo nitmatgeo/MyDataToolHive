@@ -88,7 +88,7 @@ def map_to_canonical(
                 column_index=col.column_index,
                 column_letter=col.column_letter,
                 hierarchical_header=header,
-                bronze_column_name=col.bronze_column_name,
+                db_canonical_bronze_column_name=col.db_canonical_bronze_column_name,
                 canonical_field=canonical_field,
                 mapping_status=status,
                 mapping_method=method,

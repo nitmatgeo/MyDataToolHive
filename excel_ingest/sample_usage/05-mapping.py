@@ -5,6 +5,22 @@
 # MAGIC Runs `framework.ingest()` (full pipeline) on representative sample files using a
 # MAGIC FreshMart retail canonical dictionary. Shows confidence scores and mapping status
 # MAGIC for each column. Demonstrates rule-only, LLM-assisted, and multi-sheet scenarios.
+# MAGIC
+# MAGIC **Key columns in `mapping_records()` output:**
+# MAGIC
+# MAGIC | Column | What it is |
+# MAGIC |---|---|
+# MAGIC | `db_canonical_bronze_column_name` | SQL-safe Delta column name — use this in your **bronze** `CREATE TABLE` |
+# MAGIC | `canonical_field` | Business field name from your canonical dict — your **silver** target |
+# MAGIC | `mapping_status` | AUTO_APPROVED / NEEDS_REVIEW / REQUIRES_HUMAN / UNMAPPED |
+# MAGIC | `status_description` | Plain-English explanation of the status — no docs lookup needed |
+# MAGIC | `requires_action` | `true` = human must review before this column can be loaded safely |
+# MAGIC | `final_confidence` | 0.0–1.0 confidence score (rule-based ± LLM) |
+# MAGIC
+# MAGIC **How to use the mapping output:**
+# MAGIC - Filter `requires_action = true` to find columns needing review before going to production.
+# MAGIC - The `db_canonical_bronze_column_name → canonical_field` pairs are your **silver transform spec**:
+# MAGIC   rename bronze columns to canonical names, then apply business logic.
 
 # COMMAND ----------
 
@@ -79,8 +95,9 @@ framework = ExcelIngestFramework(spark=spark)
 # COMMAND ----------
 
 # DBTITLE 1,Mapping Status Reference
-# mapping_status values in the output tables below — what each means and what action is needed.
-# requires_action=True means a human must review the column before it can be loaded safely.
+# What each mapping_status value means and whether a human must act before loading.
+# This table is always available — you never need to look up status codes in the docs.
+# requires_action=True  →  do NOT load this column to production without human review.
 
 from excel_ingest import MappingStatus
 
@@ -167,8 +184,16 @@ display(spark.createDataFrame([r.summary_record() for r in all_results]))
 # COMMAND ----------
 
 # DBTITLE 1,All Files — Combined mapping detail (scrollable)
-# One row per column across all 5 files.
-# Filter by file_id, mapping_status, or requires_action=True to find columns needing review.
+# One row per column across all 5 files. Each row is the complete spec for one column:
+#
+#   db_canonical_bronze_column_name  = the Delta column name to use in your bronze table
+#   canonical_field                  = the business field name to use in your silver table
+#   requires_action = true           = this column needs human review before loading
+#
+# Useful filters:
+#   requires_action = true           → all columns still needing a decision
+#   mapping_status = 'UNMAPPED'      → columns with no match — add them to canonical_dict
+#   file_id = 'S12_UK'              → inspect one file only
 
 all_records = [rec for r in all_results for rec in r.mapping_records()]
 display(spark.createDataFrame(all_records))

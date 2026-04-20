@@ -17,7 +17,7 @@ class ColumnMetadata:
     column_index: int                      # 1-based
     column_letter: str
     hierarchical_header: str               # "[Parent].[Child]" or "[Header]"
-    bronze_column_name: str                # unique SQL-safe Delta column name
+    db_canonical_bronze_column_name: str                # unique SQL-safe Delta column name
     raw_header_texts: List[Optional[str]]  # one entry per header row
     section_id: int                        # partition by blank separator columns
     is_blank_column: bool
@@ -71,7 +71,7 @@ class MetadataExtractionResult:
                 "col_index":           c.column_index,
                 "col_letter":          c.column_letter,
                 "hierarchical_header": c.hierarchical_header,
-                "bronze_column_name":  c.bronze_column_name,
+                "db_canonical_bronze_column_name":  c.db_canonical_bronze_column_name,
                 "column_group":        c.section_id,
                 "is_blank":            c.is_blank_column,
                 "is_hidden":           c.is_hidden_column,
@@ -80,6 +80,21 @@ class MetadataExtractionResult:
             }
             for c in self.column_metadata
         ]
+
+    def bronze_schema(self) -> Dict[str, int]:
+        """Column map for this file: {db_canonical_bronze_column_name: column_index}.
+
+        Non-blank columns only. Use to build the file-specific SELECT when loading
+        into a superset bronze table — columns absent from this file are NULL-filled::
+
+            schema = meta.bronze_schema()
+            # {"employee_id": 1, "first_name": 2, ...}
+        """
+        return {
+            col.db_canonical_bronze_column_name: col.column_index
+            for col in self.column_metadata
+            if not col.is_blank_column
+        }
 
     def signature_record(self) -> Dict[str, Any]:
         """Minimal dict for schema-change tracking — file identity + header signature only.
@@ -111,7 +126,7 @@ class MetadataExtractionResult:
                 "column_index":        c.column_index,
                 "column_letter":       c.column_letter,
                 "hierarchical_header": c.hierarchical_header,
-                "bronze_column_name":  c.bronze_column_name,
+                "db_canonical_bronze_column_name":  c.db_canonical_bronze_column_name,
                 "section_id":          c.section_id,
                 "is_blank_column":     c.is_blank_column,
                 "is_hidden_column":    c.is_hidden_column,
@@ -241,6 +256,29 @@ def combine_column_records(results: List[MetadataExtractionResult]) -> List[Dict
     return [rec for r in results for rec in r.column_records()]
 
 
+def build_superset_schema(results: List[MetadataExtractionResult]) -> List[str]:
+    """Return sorted list of all distinct db_canonical_bronze_column_names across a list of results.
+
+    Use to derive the superset column set for a consolidated bronze table when ingesting
+    multiple files with varying structures (e.g. 60 country HR files where some columns
+    are GDPR-suppressed or country-specific). Missing columns in individual files load
+    as NULL when the superset schema is used::
+
+        all_cols = build_superset_schema(all_sheet1_metadata)
+        ddl = ", ".join(f"`{c}` STRING" for c in all_cols)
+        spark.sql(f"CREATE TABLE IF NOT EXISTS bronze.hr_sheet1 ({ddl}, source_file STRING)")
+
+        # Per file: meta.bronze_schema() gives {col_name: col_index} for NULL-safe SELECT
+    """
+    cols = {
+        col.db_canonical_bronze_column_name
+        for r in results
+        for col in r.column_metadata
+        if not col.is_blank_column
+    }
+    return sorted(cols)
+
+
 def _generate_signature(column_headers: List[str]) -> str:
     canonical = "|".join(column_headers)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -293,7 +331,7 @@ def extract_metadata(
     # Generate bronze column names — needs all headers together for uniqueness resolution
     bronze_names = _assign_bronze_names([x[2] for x in intermediates])
 
-    # Second pass: build ColumnMetadata with bronze_column_name assigned
+    # Second pass: build ColumnMetadata with db_canonical_bronze_column_name assigned
     columns: List[ColumnMetadata] = []
     for (col_idx, raw_texts, hier, in_merge, span), bronze_name in zip(intermediates, bronze_names):
         columns.append(
@@ -301,7 +339,7 @@ def extract_metadata(
                 column_index=col_idx,
                 column_letter=get_column_letter(col_idx),
                 hierarchical_header=hier,
-                bronze_column_name=bronze_name,
+                db_canonical_bronze_column_name=bronze_name,
                 raw_header_texts=raw_texts,
                 section_id=section_ids[col_idx - 1],
                 is_blank_column=(col_idx in blank_cols),

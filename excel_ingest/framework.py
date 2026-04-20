@@ -275,19 +275,21 @@ STEP 1 — Instantiate the framework
 
   # With Databricks Foundation Models LLM adapter (no endpoint setup needed)
   from excel_ingest.mapping.adapters.databricks import DatabricksAdapter
-  adapter = DatabricksAdapter(model="databricks-llama-3-70b-instruct")
-  framework = ExcelIngestFramework(spark=spark, adapter=adapter)
+  framework = ExcelIngestFramework(spark=spark,
+                                   adapter=DatabricksAdapter())
 
   # With OpenAI or Anthropic adapter
   from excel_ingest.mapping.adapters.openai import OpenAIAdapter
   from excel_ingest.mapping.adapters.anthropic import AnthropicAdapter
-  adapter = OpenAIAdapter(model="gpt-4o-mini")            # reads OPENAI_API_KEY
-  adapter = AnthropicAdapter(model="claude-haiku-4-5-20251001")  # reads ANTHROPIC_API_KEY
+  framework = ExcelIngestFramework(spark=spark,
+                                   adapter=OpenAIAdapter())        # reads OPENAI_API_KEY
+  framework = ExcelIngestFramework(spark=spark,
+                                   adapter=AnthropicAdapter())     # reads ANTHROPIC_API_KEY
 
 STEP 2 — Define your canonical dictionary (any domain)
 ────────────────────────────────────────────────────────
   # Fully caller-supplied — no hardcoded fields in the package.
-  # Keys = canonical field names.  Values = known aliases for that field.
+  # Keys = your target field names.  Values = known aliases in source files.
   canonical_dict = {
       "order_id":     ["order id", "order no", "transaction id"],
       "product_name": ["product name", "item name", "description"],
@@ -301,51 +303,112 @@ STEP 3 — Run the full pipeline (recommended)
   result = framework.ingest(
       file_path      = "/Volumes/<catalog>/<schema>/<volume>/data.xlsx",
       canonical_dict = canonical_dict,
-      country_code   = "UK",          # optional ISO-2 hint for LLM adapter
+      country_code   = "UK",              # optional ISO-2 hint for LLM adapter
       file_id        = "ORDERS_2026_Q1",  # optional — defaults to filename
-      # config       = FileProcessingConfig(sheet_name="Sheet1"),  # multi-sheet files
-      # password     = "secret",      # password-protected files
-      # prior_mappings = {...},        # boost confidence for previously-seen headers
+      # config       = FileProcessingConfig(sheet_name="Orders"),  # multi-sheet files
+      # password     = "secret",          # password-protected files
+      # prior_mappings = {...},            # boosts confidence for known headers
   )
-  print(result.success)
-  for m in result.mappings:
-      print(m.hierarchical_header, "→", m.canonical_field, f"({m.final_confidence:.2f})")
 
-  NOTE: sheet_name is MANDATORY for files with more than one visible sheet.
+  NOTE: sheet_name is MANDATORY when a file has more than one visible sheet.
 
-STEP 4 — Inspect confidence buckets
-──────────────────────────────────────
-  from excel_ingest import MappingStatus
+  # Aggregate summary — one row per file
+  display(spark.createDataFrame([result.summary_record()]))
+  # → file_id | success | total_cols | auto_approved | needs_review | requires_human | unmapped
 
-  auto     = [m for m in result.mappings if m.mapping_status == MappingStatus.AUTO_APPROVED]
-  review   = [m for m in result.mappings if m.mapping_status == MappingStatus.NEEDS_REVIEW]
-  manual   = [m for m in result.mappings if m.mapping_status == MappingStatus.REQUIRES_HUMAN]
-  unmapped = [m for m in result.mappings if m.mapping_status == MappingStatus.UNMAPPED]
+  # Full per-column detail — scrollable table
+  display(spark.createDataFrame(result.mapping_records()))
+  # → col_index | col_letter | hierarchical_header | db_canonical_bronze_column_name
+  #   | canonical_field | mapping_status | status_description | requires_action
+  #   | mapping_method | final_confidence | rule_score | ...
+
+STEP 4 — Act on mapping results (no enum imports needed)
+──────────────────────────────────────────────────────────
+  # mapping_records() includes status_description and requires_action as columns —
+  # you never need to import or switch on MappingStatus to act on results.
+
+  df = spark.createDataFrame(result.mapping_records())
+
+  # Columns that need human review before loading
+  df.filter("requires_action = true").display()
+
+  # Only auto-approved mappings (safe to load without review)
+  df.filter("mapping_status = 'AUTO_APPROVED'").display()
 
   Confidence formula:
     With LLM:    final = 0.7 × rule_score + 0.3 × llm_confidence
     Without LLM: final = rule_score
     > 0.9  → AUTO_APPROVED | 0.7–0.9 → NEEDS_REVIEW | < 0.7 → REQUIRES_HUMAN
 
-STEP 5 — Persist results to Delta (optional)
+STEP 5 — Understand the two output column names
+─────────────────────────────────────────────────
+  Each column in the mapping output has two distinct identifiers:
+
+  db_canonical_bronze_column_name
+    The SQL-safe Delta column name for the bronze table — derived from the
+    Excel hierarchical header. This is the name to use in your CREATE TABLE
+    statement and when reading from the bronze table.
+    Example: [Cost & Margin].[Margin %]  →  cost_and_margin__margin_pct
+
+  canonical_field
+    The business field name from your canonical_dict — this is the silver-layer
+    mapping target. One bronze column maps to one canonical field.
+    Example: cost_and_margin__margin_pct  →  margin_pct
+
+  Bronze layer = as-is Excel structure, using db_canonical_bronze_column_name.
+  Silver layer = business schema, using canonical_field.
+
+STEP 6 — Build a bronze Delta table from metadata
+───────────────────────────────────────────────────
+  from excel_ingest import build_superset_schema
+  from excel_ingest.structure import FileProcessingConfig
+
+  # Run Stage 3 on each file (no canonical_dict needed at this step)
+  all_metadata = []
+  for file_path in my_files:
+      structure = framework.detect_structure(file_path, config=...)
+      meta      = framework.extract_metadata(file_path, structure)
+      all_metadata.append(meta)
+
+  # Superset of all column names across all files
+  # Files with fewer columns simply have NULL in the extra columns
+  all_cols = build_superset_schema(all_metadata)
+  # → ['city', 'customer_id', 'customer_name', 'department', 'employee_id', ...]
+
+  # DDL — all columns as STRING; cast to correct types in the silver layer
+  col_defs = ", ".join(f"`{c}` STRING" for c in all_cols)
+  spark.sql(f"""
+      CREATE TABLE IF NOT EXISTS {MY_CATALOG}.{INGEST_SCHEMA}.hr_bronze
+      ({col_defs}, source_file STRING, source_sheet STRING)
+  """)
+
+  # Per file: bronze_schema() maps column name → column index in that file
+  schema = meta.bronze_schema()
+  # → {"employee_id": 1, "first_name": 2, "department": 5, ...}
+  # Columns absent from this file are NULL-filled when writing to the superset table.
+
+STEP 7 — Persist results to Delta (optional)
 ──────────────────────────────────────────────
+  # File-level summary
   spark.createDataFrame([result.file_record()]).write \\
-      .mode("append").saveAsTable("`<catalog>`.`<schema>`.`excel_file_metadata`")
+      .mode("append").saveAsTable(f"{MY_CATALOG}.{INGEST_SCHEMA}.excel_file_metadata")
 
+  # Column metadata (includes db_canonical_bronze_column_name)
   spark.createDataFrame(result.metadata_records()).write \\
-      .mode("append").saveAsTable("`<catalog>`.`<schema>`.`excel_column_metadata`")
+      .mode("append").saveAsTable(f"{MY_CATALOG}.{INGEST_SCHEMA}.excel_column_metadata")
 
+  # Canonical mapping spec (bronze col → canonical field)
   spark.createDataFrame(result.mapping_records()).write \\
-      .mode("append").saveAsTable("`<catalog>`.`<schema>`.`excel_canonical_mappings`")
+      .mode("append").saveAsTable(f"{MY_CATALOG}.{INGEST_SCHEMA}.excel_canonical_mappings")
 
 STAGE-BY-STAGE (for debugging or inspection)
 ──────────────────────────────────────────────
   from excel_ingest.structure import FileProcessingConfig
 
-  v = framework.validate(file_path)                          # Stage 1
-  s = framework.detect_structure(file_path, config)          # Stage 2
-  m = framework.extract_metadata(file_path, s, file_id="x") # Stage 3
-  mappings = framework.map_to_canonical(m, canonical_dict)   # Stage 4
+  v        = framework.validate(file_path)                           # Stage 1
+  s        = framework.detect_structure(file_path, config=config)    # Stage 2
+  meta     = framework.extract_metadata(file_path, s, file_id="x")  # Stage 3
+  mappings = framework.map_to_canonical(meta, canonical_dict)        # Stage 4
 
 OTHER METHODS
 ─────────────

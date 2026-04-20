@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "databricks-excel-ingest-framework"
-version = "0.1.0a12"
+version = "0.1.0a13"
 description = "Databricks-native Excel ingestion framework: validate, detect structure, extract metadata, and map columns to canonical fields"
 readme = "README.md"
 requires-python = ">=3.9"
