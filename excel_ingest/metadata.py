@@ -100,6 +100,20 @@ def _merge_span_for_col(col_idx: int, merged_cells) -> int:
     return 1
 
 
+def _get_horizontal_merge_value(row_idx: int, col_idx: int, merged_cells) -> Optional[str]:
+    """Return the parent label when col_idx sits inside a horizontal merge in row_idx.
+
+    Only horizontal merges (same row, multiple columns) propagate their label to
+    sibling columns.  Vertical merges (same column, multiple rows) are excluded to
+    avoid duplicating values across header levels.
+    """
+    for m in merged_cells:
+        if (m.min_row == row_idx == m.max_row
+                and m.min_col < col_idx <= m.max_col):
+            return m.top_left_value
+    return None
+
+
 def _generate_signature(column_headers: List[str]) -> str:
     canonical = "|".join(column_headers)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -141,7 +155,9 @@ def extract_metadata(
             for row_idx in header_rows:
                 row_vals = header_struct.raw_headers.get(row_idx, [])
                 val = row_vals[col_idx - 1] if col_idx - 1 < len(row_vals) else None
-                raw_texts.append(val if val and val.strip() else None)
+                if not val or not str(val).strip():
+                    val = _get_horizontal_merge_value(row_idx, col_idx, merged)
+                raw_texts.append(val if val and str(val).strip() else None)
         else:
             raw_texts = [None]
 

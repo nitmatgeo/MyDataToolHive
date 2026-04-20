@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.0a9] — 2026-04-20
+
+### Fixed
+- **Merged parent header propagation** (`metadata.py`): sibling columns within a horizontally
+  merged parent header now carry the parent prefix in their `hierarchical_header`. Previously
+  only the first column received `[Parent].[Child]`; all others showed `[Child]` alone.
+  New helper `_get_horizontal_merge_value()` looks up the top-left cell value for any column
+  sitting inside a same-row merge. Vertical merges are excluded to avoid duplicating values
+  across header levels.
+- **`file_name` column in full column listing** (`04-metadata.py`): renamed `"file"` →
+  `"file_name"` in the `display()` DataFrame for clarity.
+
 ## [0.1.0a8] — 2026-04-20
 
 ### Added
@@ -41,6 +53,12 @@
   `[WARN]`; `NO_HEADERS` and `NO_DATA` show `[INFO]`.
 - **Status description shown inline** (`03-structure.py`): each file's status line now includes
   `FileStatus.description` so the meaning and next step are visible without consulting docs.
+- **Status and Status Description on separate lines** (`03-structure.py`): `Status` carries the
+  machine-readable enum value; `Status Description` carries the plain-English explanation —
+  allowing orchestration code to consume the status independently of the description.
+- **Notebook output labels standardised to Title Case** (`03-structure.py`): all output labels
+  (e.g. `Header Rows`, `Data Starts`, `Merged Regions`, `Header Range`) now use consistent
+  Title Case formatting.
 
 ## [0.1.0a4] — 2026-04-20
 

@@ -74,6 +74,30 @@ for cfg in FILE_CONFIGS:
 
 # COMMAND ----------
 
+# DBTITLE 1,Full Column Listing — all files (scrollable table)
+# Renders every column across all 12 files as a sortable Databricks table.
+# Filter by file_id or section_id to inspect wide files (S07: 65 cols, S12: 45 cols).
+
+col_records = []
+for cfg, meta in zip(FILE_CONFIGS, all_metadata):
+    for col in meta.column_metadata:
+        col_records.append({
+            "file_id":            cfg["id"],
+            "file_name":          cfg["file"],
+            "col_index":          col.column_index,
+            "col_letter":         col.column_letter,
+            "section":            col.section_id,
+            "hierarchical_header": col.hierarchical_header,
+            "is_blank":           col.is_blank_column,
+            "is_hidden":          col.is_hidden_column,
+            "is_merged":          col.is_part_of_merge,
+            "merge_span":         col.merge_span_cols,
+        })
+
+display(spark.createDataFrame(col_records))
+
+# COMMAND ----------
+
 # DBTITLE 1,Signature Comparison — detect matching layouts
 
 print("Signature comparison (files with identical layouts share a signature):\n")
