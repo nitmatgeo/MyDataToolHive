@@ -110,13 +110,13 @@ for cfg in FILE_CONFIGS:
     path = f"{VOLUME_PATH}/{cfg['file']}"
     s    = framework.detect_structure(path, config=cfg["config"], password=cfg["password"])
 
-    status_icon = "OK" if s.status == FileStatus.VALID else (
-                  "WARN" if s.status == FileStatus.NO_HEADERS else "INFO")
+    status_icon = "OK"   if s.status == FileStatus.VALID else (
+                  "WARN" if s.status.is_actionable       else "INFO")
 
     print(f"[{status_icon}] {cfg['label']}")
     print(f"       File           : {cfg['file']}")
     print(f"       Sheet          : {s.sheet_name}")
-    print(f"       Status         : {s.status.value}")
+    print(f"       Status         : {s.status.value}  — {s.status.description}")
     print(f"       Dimensions     : {s.total_rows} rows x {s.total_cols} cols")
     print(f"       Header rows    : {s.header_structure.header_row_indices if s.header_structure else 'none detected'}")
     print(f"       Data starts    : row {s.header_structure.data_start_row if s.header_structure else 'N/A'}")

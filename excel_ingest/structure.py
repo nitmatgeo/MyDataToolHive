@@ -11,12 +11,32 @@ from excel_ingest.validation import _resolve_local_path
 
 
 class FileStatus(Enum):
-    VALID = "VALID"
-    NO_HEADERS = "NO_HEADERS"
-    NO_DATA = "NO_DATA"
-    EMPTY_FILE = "EMPTY_FILE"
-    INVALID_STRUCTURE = "INVALID_STRUCTURE"
-    SHEET_NOT_SPECIFIED = "SHEET_NOT_SPECIFIED"   # multi-sheet file, no sheet_name given
+    VALID               = "VALID"
+    NO_HEADERS          = "NO_HEADERS"
+    NO_DATA             = "NO_DATA"
+    EMPTY_FILE          = "EMPTY_FILE"
+    INVALID_STRUCTURE   = "INVALID_STRUCTURE"
+    SHEET_NOT_SPECIFIED = "SHEET_NOT_SPECIFIED"
+
+    @property
+    def description(self) -> str:
+        return {
+            "VALID":               "File is readable and has both headers and data rows.",
+            "NO_HEADERS":          "No header row detected. File may be raw data — set data_start_row=1 in FileProcessingConfig if intentional.",
+            "NO_DATA":             "Header row(s) found but no data rows follow. The sheet may be a template or empty submission form.",
+            "EMPTY_FILE":          "Sheet has no rows or columns. Check the file is not corrupt and the correct sheet is selected.",
+            "INVALID_STRUCTURE":   "Sheet structure could not be resolved. Review merged cells or irregular layout.",
+            "SHEET_NOT_SPECIFIED": "File has multiple visible sheets but no sheet_name was given. Set sheet_name in FileProcessingConfig.",
+        }[self.value]
+
+    @property
+    def is_actionable(self) -> bool:
+        """True when the status requires the caller to take action before proceeding."""
+        return self in (
+            FileStatus.EMPTY_FILE,
+            FileStatus.INVALID_STRUCTURE,
+            FileStatus.SHEET_NOT_SPECIFIED,
+        )
 
 
 @dataclass

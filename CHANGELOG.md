@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0a7] — 2026-04-20
+## [0.1.0a8] — 2026-04-20
 
 ### Added
 - **`FileStructureMetadata.header_range`** (`structure.py`): new property returning the header rows
@@ -8,6 +8,12 @@
   Returns `None` when no headers are detected.
 - **`FileStructureMetadata.data_range`** (`structure.py`): new property returning the data rows as
   an Excel A1-notation range string, e.g. `"A2:L21"`. Returns `None` when there are no data rows.
+- **`FileStatus.description`** (`structure.py`): new property on each enum member returning a
+  plain-English explanation of the status and what action (if any) is required. Surfaces inline in
+  notebook output so users never need to look up internal status codes.
+- **`FileStatus.is_actionable`** (`structure.py`): new property returning `True` for statuses that
+  require caller action before the pipeline can proceed (`EMPTY_FILE`, `INVALID_STRUCTURE`,
+  `SHEET_NOT_SPECIFIED`). Used by the notebook icon logic and available to any calling code.
 
 ### Fixed
 - **Header auto-detection rewritten** (`structure.py`): previous algorithm stopped only on
@@ -30,6 +36,11 @@
   instead of a cryptic openpyxl fallback failure.
 - **`ImportError` routed separately in `_check_password_and_sheets`**: previously a missing-package
   error could be misclassified as a wrong-password error. Now surfaces its own message.
+- **Status icon mapping** (`03-structure.py`): icon now driven by `FileStatus.is_actionable`
+  instead of a hardcoded enum check. `EMPTY_FILE` and `SHEET_NOT_SPECIFIED` correctly show
+  `[WARN]`; `NO_HEADERS` and `NO_DATA` show `[INFO]`.
+- **Status description shown inline** (`03-structure.py`): each file's status line now includes
+  `FileStatus.description` so the meaning and next step are visible without consulting docs.
 
 ## [0.1.0a4] — 2026-04-20
 
