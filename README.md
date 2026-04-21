@@ -11,6 +11,32 @@ Python class, making them available to pure Databricks teams without a SQL Serve
 
 ---
 
+> [!NOTE]
+> **Get started in 2 minutes**
+>
+> ```bash
+> pip install databricks-etl-monitor
+> ```
+>
+> In a Databricks notebook:
+>
+> ```python
+> %pip install databricks-etl-monitor
+> dbutils.library.restartPython()
+> ```
+>
+> Then extract the sample notebooks directly into your workspace — they walk through full setup, config, and a live run:
+>
+> ```python
+> from etl_monitor import ETLMonitorFramework
+> monitor = ETLMonitorFramework(spark, catalog="<your_catalog>", schema="etl")
+> monitor.sample_usage(spark)   # extracts 00-infrastructure through 03-run into your Workspace
+> ```
+>
+> Run `00-infrastructure.py` first to create the catalog and ETL schema, then `01-install.py` to install the framework on the cluster and call `setup()` — which creates all 6 Delta tables, 6 views, and seeds the workflow stage definitions. Both are idempotent and safe to re-run.
+
+---
+
 ## Why this framework?
 
 Most existing tools cover one platform or the other:
