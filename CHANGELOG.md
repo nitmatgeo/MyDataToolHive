@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0a16] — 2026-04-21
+
+### Fixed
+- **`is_password_protected` always `False` in two scenarios** (`validation.py`):
+  1. When no password is supplied for an encrypted file, openpyxl raises
+     `"File is not a zip file"` (AES-encrypted xlsx is CFBF, not a zip). This error
+     did not match the existing `"password"/"encrypted"/"decrypt"` check, so
+     `is_password_protected` was incorrectly returned as `False`. Added
+     `"not a zip file"` and `"bad zip"` to the detection pattern.
+  2. When the correct password was supplied and decryption succeeded, the success path
+     always returned `is_password_protected=False`. Changed to `password is not None`
+     so the field accurately reflects the file's encrypted state.
+
 ## [0.1.0a15] — 2026-04-21
 
 ### Added

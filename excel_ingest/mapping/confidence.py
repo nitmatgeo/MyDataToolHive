@@ -70,7 +70,7 @@ class CanonicalMapping:
             "column_letter":       self.column_letter,
             "hierarchical_header": self.hierarchical_header,
             "db_canonical_bronze_column_name":  self.db_canonical_bronze_column_name,
-            "canonical_field":     self.canonical_field,
+            "canonical_field":     self.canonical_field or "",
             "mapping_status":      self.mapping_status.value,
             "status_description":  self.mapping_status.description,
             "requires_action":     self.mapping_status.requires_action,
@@ -78,7 +78,7 @@ class CanonicalMapping:
             "final_confidence":    round(self.final_confidence, 4),
             "rule_score":          round(self.rule_score, 4),
             "llm_confidence":      round(self.llm_confidence, 4),
-            "llm_reasoning":       self.llm_reasoning,
+            "llm_reasoning":       self.llm_reasoning or "",
         }
 
 

@@ -189,13 +189,17 @@ def _check_password_and_sheets(
             )
         wb.close()
         msgs.append(f"Workbook readable — {len(sheets)} sheet(s) found.")
-        return True, False, sheets, active_name, msgs
+        # Decryption succeeded with a password → file IS password-protected.
+        return True, password is not None, sheets, active_name, msgs
     except ImportError as exc:
         msgs.append(str(exc))
         return False, False, [], None, msgs
     except Exception as exc:
         msg = str(exc).lower()
-        if "password" in msg or "encrypted" in msg or "decrypt" in msg:
+        # "not a zip file" / "bad zip file" = openpyxl trying to open an AES-encrypted
+        # xlsx without decryption — the file is password-protected but no password was given.
+        if ("password" in msg or "encrypted" in msg or "decrypt" in msg
+                or "not a zip file" in msg or "bad zip" in msg):
             if password is not None:
                 msgs.append("Password provided but incorrect or unsupported encryption.")
             else:
