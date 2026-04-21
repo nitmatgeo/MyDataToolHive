@@ -170,18 +170,19 @@ def load_excel_data(
             f"No data rows to load from '{source_sheet}' in '{source_file}'."
         )
 
-    # Build Spark DataFrame
-    if rows:
-        df = spark.createDataFrame(rows)
-    else:
-        from pyspark.sql.types import StringType, StructField, StructType, TimestampType
-        fields = [StructField(name, StringType(), True) for name in col_map.values()]
-        fields += [
+    # Build Spark DataFrame — always use explicit schema so Spark never needs to infer
+    # types. Inference fails when an entire column is NULL (CANNOT_DETERMINE_TYPE).
+    # All bronze columns are STRING by design; auto-columns have known fixed types.
+    from pyspark.sql.types import StringType, StructField, StructType, TimestampType
+    schema = StructType(
+        [StructField(name, StringType(), True) for name in col_map.values()]
+        + [
             StructField("source_file",      StringType(),    True),
             StructField("source_sheet",     StringType(),    True),
             StructField("insert_timestamp", TimestampType(), True),
         ]
-        df = spark.createDataFrame([], StructType(fields))
+    )
+    df = spark.createDataFrame(rows, schema=schema)
 
     return LoadResult(df=df, metadata=metadata, messages=msgs)
 

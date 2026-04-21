@@ -34,7 +34,7 @@ VOLUME_PATH   = f"/Volumes/{MY_CATALOG}/{INGEST_SCHEMA}/{VOLUME_NAME}"
 # COMMAND ----------
 
 # DBTITLE 1,Initialise Framework
-from excel_ingest import ExcelIngestFramework, combine_column_records, build_superset_schema
+from excel_ingest import ExcelIngestFramework, combine_column_records, build_superset_schema, COLUMN_RECORD_FIELDS, SIGNATURE_RECORD_FIELDS
 from excel_ingest.structure import FileProcessingConfig
 
 framework = ExcelIngestFramework(spark=spark)
@@ -78,6 +78,7 @@ for cfg in FILE_CONFIGS:
         "file_id":            fm.file_id,
         "file_name":          fm.file_name,
         "sheet_name":         fm.sheet_name,
+        "sheet_selection":    fm.sheet_selection,
         "total_rows":         fm.total_rows,
         "total_cols":         fm.total_cols,
         "data_row_count":     fm.data_row_count,
@@ -94,9 +95,10 @@ display(spark.createDataFrame(all_file_summaries))
 
 # DBTITLE 1,Full Column Listing — all files (scrollable table)
 # combine_column_records() flattens all metadata into one list ready for display().
+# .select() enforces logical column order — Spark alphabetises dict keys by default.
 # Filter by file_id or column_group to inspect wide files (S07: 65 cols, S12: 45 cols).
 
-display(spark.createDataFrame(combine_column_records(all_metadata)))
+display(spark.createDataFrame(combine_column_records(all_metadata)).select(COLUMN_RECORD_FIELDS))
 
 # COMMAND ----------
 
@@ -133,8 +135,10 @@ for rec in ms_sheet_records:
     rec["schema_group"]      = anchor
     rec["is_header_unique"]  = anchor == rec["sheet_name"]
 
-display(spark.createDataFrame(ms_sheet_records))
-display(spark.createDataFrame(ms_col_records))
+display(spark.createDataFrame(ms_sheet_records).select(
+    SIGNATURE_RECORD_FIELDS + ["schema_group", "is_header_unique"]
+))
+display(spark.createDataFrame(ms_col_records).select(COLUMN_RECORD_FIELDS))
 
 # COMMAND ----------
 
@@ -143,7 +147,7 @@ display(spark.createDataFrame(ms_col_records))
 # Files with the same header_signature have identical column layouts.
 # Store this table after every ingest run — compare on the next run to detect schema drift.
 
-display(spark.createDataFrame([m.signature_record() for m in all_metadata]))
+display(spark.createDataFrame([m.signature_record() for m in all_metadata]).select(SIGNATURE_RECORD_FIELDS))
 
 # COMMAND ----------
 

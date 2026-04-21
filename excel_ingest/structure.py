@@ -66,6 +66,7 @@ class HeaderStructure:
 @dataclass
 class FileStructureMetadata:
     sheet_name: str
+    sheet_selection: str                   # "user_specified" | "auto_selected"
     status: FileStatus
     header_structure: Optional[HeaderStructure]
     merged_cells: List[MergedCellInfo]
@@ -113,6 +114,7 @@ class FileStructureMetadata:
             "label":              label,
             "file":               file_path,
             "sheet_name":         self.sheet_name,
+            "sheet_selection":    self.sheet_selection,
             "status":             self.status.value,
             "status_description": self.status.description,
             "is_actionable":      self.status.is_actionable,
@@ -377,6 +379,7 @@ def analyze_excel_structure(
     password: Optional[str] = None,
 ) -> FileStructureMetadata:
     config = config or FileProcessingConfig()
+    sheet_selection = "user_specified" if config.sheet_name else "auto_selected"
     local_path = _resolve_local_path(file_path)
     msgs: List[str] = []
 
@@ -414,6 +417,7 @@ def analyze_excel_structure(
         wb.close()
         return FileStructureMetadata(
             sheet_name="",
+            sheet_selection=sheet_selection,
             status=FileStatus.SHEET_NOT_SPECIFIED,
             header_structure=None,
             merged_cells=[], blank_column_indices=[], hidden_column_indices=[],
@@ -427,7 +431,8 @@ def analyze_excel_structure(
     if total_rows == 0 or total_cols == 0:
         wb.close()
         return FileStructureMetadata(
-            sheet_name=sheet_name, status=FileStatus.EMPTY_FILE,
+            sheet_name=sheet_name, sheet_selection=sheet_selection,
+            status=FileStatus.EMPTY_FILE,
             header_structure=None,
             merged_cells=[], blank_column_indices=[], hidden_column_indices=[],
             total_rows=total_rows, total_cols=total_cols, data_row_count=0, messages=msgs,
@@ -454,6 +459,7 @@ def analyze_excel_structure(
 
     return FileStructureMetadata(
         sheet_name=sheet_name,
+        sheet_selection=sheet_selection,
         status=status,
         header_structure=header_struct,
         merged_cells=merged,

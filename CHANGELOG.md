@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.0a19] — 2026-04-21
+
+### Added
+- **`sheet_selection` field** (`structure.py`, `metadata.py`): New field on both
+  `FileStructureMetadata` and `FileMetadata` with values `"user_specified"` (caller
+  set `sheet_name` in `FileProcessingConfig`) or `"auto_selected"` (framework picked
+  the sheet — single visible sheet). Surfaces in `FileStructureMetadata.summary_record()`
+  after `sheet_name`, in `FileMetadata.to_dict()`, and in the `04-metadata.py` file
+  summary DataFrame. Makes it immediately clear which files require an explicit config.
+- **`sheet_name` in `column_records()`** (`metadata.py`): Added `sheet_name` from
+  `FileMetadata` to every column record so multi-sheet outputs are self-contained
+  — no join back to the file summary needed.
+
+### Fixed
+- **`CANNOT_DETERMINE_TYPE` in `framework.load()`** (`loader.py`): `spark.createDataFrame(rows)`
+  fails type inference when an entire bronze column contains only `None` (e.g. a column present
+  in one file but absent in another during combine). Fixed by always providing an explicit
+  `StructType` schema — all bronze columns are `STRING` by design so inference is never needed.
+- **Alphabetical column order in `combine_column_records()` output** (`04-metadata.py`):
+  `spark.createDataFrame(list_of_dicts)` sorts column names alphabetically by default.
+  Added `.select(_COL_ORDER)` in the notebook to enforce logical order:
+  `file_id → file_name → sheet_name → col_index → col_letter → column_group →
+  hierarchical_header → db_canonical_bronze_column_name → is_blank → is_hidden →
+  is_merged → merge_span`. Same fix applied to the multi-sheet column listing.
+
 ## [0.1.0a18] — 2026-04-21
 
 ### Added

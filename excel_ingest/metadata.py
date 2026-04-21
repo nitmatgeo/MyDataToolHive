@@ -31,6 +31,7 @@ class FileMetadata:
     file_id: str
     file_name: str
     sheet_name: str
+    sheet_selection: str                   # "user_specified" | "auto_selected"
     total_rows: int
     total_cols: int
     data_row_count: int
@@ -43,6 +44,7 @@ class FileMetadata:
             "file_id": self.file_id,
             "file_name": self.file_name,
             "sheet_name": self.sheet_name,
+            "sheet_selection": self.sheet_selection,
             "total_rows": self.total_rows,
             "total_cols": self.total_cols,
             "data_row_count": self.data_row_count,
@@ -66,17 +68,18 @@ class MetadataExtractionResult:
         """
         return [
             {
-                "file_id":                        self.file_metadata.file_id,
-                "file_name":                      self.file_metadata.file_name,
-                "col_index":                      c.column_index,
-                "col_letter":                     c.column_letter,
-                "column_group":                   c.section_id,
-                "hierarchical_header":            c.hierarchical_header,
+                "file_id":                         self.file_metadata.file_id,
+                "file_name":                       self.file_metadata.file_name,
+                "sheet_name":                      self.file_metadata.sheet_name,
+                "col_index":                       c.column_index,
+                "col_letter":                      c.column_letter,
+                "column_group":                    c.section_id,
+                "hierarchical_header":             c.hierarchical_header,
                 "db_canonical_bronze_column_name": c.db_canonical_bronze_column_name,
-                "is_blank":                       c.is_blank_column,
-                "is_hidden":                      c.is_hidden_column,
-                "is_merged":                      c.is_part_of_merge,
-                "merge_span":                     c.merge_span_cols,
+                "is_blank":                        c.is_blank_column,
+                "is_hidden":                       c.is_hidden_column,
+                "is_merged":                       c.is_part_of_merge,
+                "merge_span":                      c.merge_span_cols,
             }
             for c in self.column_metadata
         ]
@@ -246,6 +249,31 @@ def _assign_bronze_names(hier_headers: List[str]) -> List[str]:
     return names
 
 
+SIGNATURE_RECORD_FIELDS: List[str] = [
+    "file_id", "file_name", "sheet_name", "total_cols", "header_signature",
+]
+"""Canonical column order for DataFrames built from signature_record() output."""
+
+
+COLUMN_RECORD_FIELDS: List[str] = [
+    "file_id", "file_name", "sheet_name",
+    "col_index", "col_letter", "column_group",
+    "hierarchical_header", "db_canonical_bronze_column_name",
+    "is_blank", "is_hidden", "is_merged", "merge_span",
+]
+"""Canonical column order for DataFrames built from column_records().
+
+Pass to .select() after spark.createDataFrame() — Spark sorts dict keys
+alphabetically by default so the order must be enforced explicitly::
+
+    from excel_ingest import combine_column_records, COLUMN_RECORD_FIELDS
+    display(
+        spark.createDataFrame(combine_column_records(all_metadata))
+             .select(COLUMN_RECORD_FIELDS)
+    )
+"""
+
+
 def combine_column_records(results: List[MetadataExtractionResult]) -> List[Dict[str, Any]]:
     """Flatten column_records() from a list of MetadataExtractionResult into one list.
 
@@ -362,6 +390,7 @@ def extract_metadata(
         file_id=file_id,
         file_name=file_name,
         sheet_name=structure.sheet_name,
+        sheet_selection=structure.sheet_selection,
         total_rows=structure.total_rows,
         total_cols=total_cols,
         data_row_count=structure.data_row_count,
