@@ -66,17 +66,17 @@ class MetadataExtractionResult:
         """
         return [
             {
-                "file_id":             self.file_metadata.file_id,
-                "file_name":           self.file_metadata.file_name,
-                "col_index":           c.column_index,
-                "col_letter":          c.column_letter,
-                "hierarchical_header": c.hierarchical_header,
-                "db_canonical_bronze_column_name":  c.db_canonical_bronze_column_name,
-                "column_group":        c.section_id,
-                "is_blank":            c.is_blank_column,
-                "is_hidden":           c.is_hidden_column,
-                "is_merged":           c.is_part_of_merge,
-                "merge_span":          c.merge_span_cols,
+                "file_id":                        self.file_metadata.file_id,
+                "file_name":                      self.file_metadata.file_name,
+                "col_index":                      c.column_index,
+                "col_letter":                     c.column_letter,
+                "column_group":                   c.section_id,
+                "hierarchical_header":            c.hierarchical_header,
+                "db_canonical_bronze_column_name": c.db_canonical_bronze_column_name,
+                "is_blank":                       c.is_blank_column,
+                "is_hidden":                      c.is_hidden_column,
+                "is_merged":                      c.is_part_of_merge,
+                "merge_span":                     c.merge_span_cols,
             }
             for c in self.column_metadata
         ]

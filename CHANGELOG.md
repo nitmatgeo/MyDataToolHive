@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0a17] — 2026-04-21
+
+### Fixed
+- **`is_password_protected` still `False` on successful decryption** (`validation.py`):
+  `validate_excel_file()` success-path return hardcoded `is_password_protected=False`,
+  ignoring the `is_protected` value returned by `_check_password_and_sheets()`. Changed
+  to `is_password_protected=is_protected` so a file opened with the correct password
+  correctly reports `True`.
+- **`CANNOT_DETERMINE_TYPE` on `spark.createDataFrame(mapping_records())`**
+  (`mapping/confidence.py`): `canonical_field` is `None` for UNMAPPED columns and
+  `llm_reasoning` is `None` when no LLM adapter is used. When all rows are `None` for a
+  column Spark cannot infer the type. Changed both to `or ""` in `to_dict()`.
+
 ## [0.1.0a16] — 2026-04-21
 
 ### Fixed

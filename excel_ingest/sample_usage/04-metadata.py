@@ -73,8 +73,19 @@ for cfg in FILE_CONFIGS:
     metadata  = framework.extract_metadata(path, structure, file_id=cfg["id"])
     all_metadata.append(metadata)
 
-    summary = metadata.file_metadata.to_dict()
-    summary["total_loadable_cols"] = len([c for c in metadata.column_metadata if not c.is_blank_column])
+    fm = metadata.file_metadata
+    summary = {
+        "file_id":            fm.file_id,
+        "file_name":          fm.file_name,
+        "sheet_name":         fm.sheet_name,
+        "total_rows":         fm.total_rows,
+        "total_cols":         fm.total_cols,
+        "data_row_count":     fm.data_row_count,
+        "total_loadable_cols": len([c for c in metadata.column_metadata if not c.is_blank_column]),
+        "num_sections":       fm.num_sections,
+        "num_merged_regions": fm.num_merged_regions,
+        "header_signature":   fm.header_signature,
+    }
     all_file_summaries.append(summary)
 
 display(spark.createDataFrame(all_file_summaries))

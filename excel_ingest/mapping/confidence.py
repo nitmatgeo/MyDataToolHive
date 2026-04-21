@@ -65,20 +65,20 @@ class CanonicalMapping:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "file_id":             self.file_id,
-            "column_index":        self.column_index,
-            "column_letter":       self.column_letter,
-            "hierarchical_header": self.hierarchical_header,
-            "db_canonical_bronze_column_name":  self.db_canonical_bronze_column_name,
-            "canonical_field":     self.canonical_field or "",
-            "mapping_status":      self.mapping_status.value,
-            "status_description":  self.mapping_status.description,
-            "requires_action":     self.mapping_status.requires_action,
-            "mapping_method":      self.mapping_method.value,
-            "final_confidence":    round(self.final_confidence, 4),
-            "rule_score":          round(self.rule_score, 4),
-            "llm_confidence":      round(self.llm_confidence, 4),
-            "llm_reasoning":       self.llm_reasoning or "",
+            "file_id":                        self.file_id,
+            "column_index":                   self.column_index,
+            "column_letter":                  self.column_letter,
+            "hierarchical_header":            self.hierarchical_header,
+            "db_canonical_bronze_column_name": self.db_canonical_bronze_column_name,
+            "canonical_field":                self.canonical_field or "",
+            "mapping_status":                 self.mapping_status.value,
+            "requires_action":                self.mapping_status.requires_action,
+            "status_description":             self.mapping_status.description,
+            "final_confidence":               round(self.final_confidence, 4),
+            "rule_score":                     round(self.rule_score, 4),
+            "llm_confidence":                 round(self.llm_confidence, 4),
+            "mapping_method":                 self.mapping_method.value,
+            "llm_reasoning":                  self.llm_reasoning or "",
         }
 
 
