@@ -78,6 +78,17 @@ class FileValidationResult:
         }
 
 
+VALIDATION_RECORD_FIELDS: list = [
+    "label", "file",
+    "status", "status_description",
+    "is_readable", "is_password_protected", "file_exists",
+    "format_type", "file_size_bytes",
+    "total_sheets", "visible_sheets",
+    "warnings", "errors",
+]
+"""Canonical column order for DataFrames built from FileValidationResult.summary_record()."""
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------

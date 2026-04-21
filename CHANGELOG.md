@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.0a20] — 2026-04-21
+
+### Added
+- **`VALIDATION_RECORD_FIELDS`** (`validation.py`, `__init__.py`): Field-order constant for
+  `FileValidationResult.summary_record()` DataFrames. Used in `02-validate.py` for both
+  the main validation table and the negative examples table.
+- **`STRUCTURE_RECORD_FIELDS`** (`structure.py`, `__init__.py`): Field-order constant for
+  `FileStructureMetadata.summary_record()` DataFrames. Used in `03-structure.py` for both
+  the main structure table and the "Files Needing Action" filter.
+
+### Fixed
+- **Alphabetical column order in `02-validate.py` and `03-structure.py`**: All `display()`
+  calls now use `.select(VALIDATION_RECORD_FIELDS)` / `.select(STRUCTURE_RECORD_FIELDS)`
+  to enforce logical column order. Follows the same pattern established in a19 for
+  `04-metadata.py`.
+
 ## [0.1.0a19] — 2026-04-21
 
 ### Added
@@ -12,18 +28,32 @@
 - **`sheet_name` in `column_records()`** (`metadata.py`): Added `sheet_name` from
   `FileMetadata` to every column record so multi-sheet outputs are self-contained
   — no join back to the file summary needed.
+- **`COLUMN_RECORD_FIELDS` / `SIGNATURE_RECORD_FIELDS`** (`metadata.py`, `__init__.py`):
+  Framework-exported field-order constants for column and signature DataFrames. Notebooks
+  import these and pass to `.select()` — adding or renaming a field only requires updating
+  `metadata.py`, not every notebook.
+- **`STRUCTURE_RECORD_FIELDS`** (`structure.py`, `__init__.py`): Field-order constant for
+  `FileStructureMetadata.summary_record()` DataFrames. Used in `03-structure.py` for both
+  the main structure table and the "Files Needing Action" filter — same pattern as the
+  metadata constants above.
+- **`VALIDATION_RECORD_FIELDS`** (`validation.py`, `__init__.py`): Field-order constant for
+  `FileValidationResult.summary_record()` DataFrames. Used in `02-validate.py` for both
+  the main validation table and the negative examples table.
+- **`FileProcessingConfig` docstring** (`structure.py`): Comprehensive `Args` docstring
+  covering all 8 fields with type, purpose, and examples. `help(FileProcessingConfig)`
+  now returns full documentation without opening the source file.
 
 ### Fixed
 - **`CANNOT_DETERMINE_TYPE` in `framework.load()`** (`loader.py`): `spark.createDataFrame(rows)`
   fails type inference when an entire bronze column contains only `None` (e.g. a column present
   in one file but absent in another during combine). Fixed by always providing an explicit
   `StructType` schema — all bronze columns are `STRING` by design so inference is never needed.
-- **Alphabetical column order in `combine_column_records()` output** (`04-metadata.py`):
-  `spark.createDataFrame(list_of_dicts)` sorts column names alphabetically by default.
-  Added `.select(_COL_ORDER)` in the notebook to enforce logical order:
-  `file_id → file_name → sheet_name → col_index → col_letter → column_group →
-  hierarchical_header → db_canonical_bronze_column_name → is_blank → is_hidden →
-  is_merged → merge_span`. Same fix applied to the multi-sheet column listing.
+- **Alphabetical column order in all sample notebooks** (`02-validate.py`, `03-structure.py`,
+  `04-metadata.py`): `spark.createDataFrame(list_of_dicts)` sorts column names alphabetically
+  by default. Fixed by exporting field-order constants from the framework (`VALIDATION_RECORD_FIELDS`,
+  `STRUCTURE_RECORD_FIELDS`, `COLUMN_RECORD_FIELDS`, `SIGNATURE_RECORD_FIELDS`) and using
+  `.select(FIELD_LIST)` in every notebook display call. Adding or renaming a field now requires
+  only updating the constant in the source module.
 
 ## [0.1.0a18] — 2026-04-21
 

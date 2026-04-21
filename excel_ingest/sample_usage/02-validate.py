@@ -33,7 +33,7 @@ VOLUME_PATH   = f"/Volumes/{MY_CATALOG}/{INGEST_SCHEMA}/{VOLUME_NAME}"
 # COMMAND ----------
 
 # DBTITLE 1,Initialise Framework
-from excel_ingest import ExcelIngestFramework
+from excel_ingest import ExcelIngestFramework, VALIDATION_RECORD_FIELDS
 
 framework = ExcelIngestFramework(spark=spark)
 
@@ -81,7 +81,7 @@ for cfg in FILE_CONFIGS:
     r    = framework.validate(path, password=cfg["password"])
     validation_records.append(r.summary_record(label=cfg["label"]))
 
-display(spark.createDataFrame(validation_records))
+display(spark.createDataFrame(validation_records).select(VALIDATION_RECORD_FIELDS))
 
 # COMMAND ----------
 
@@ -110,4 +110,4 @@ for case in NEGATIVE_CASES:
     r = framework.validate(case["path"], password=case.get("password"))
     negative_records.append(r.summary_record(label=case["label"]))
 
-display(spark.createDataFrame(negative_records))
+display(spark.createDataFrame(negative_records).select(VALIDATION_RECORD_FIELDS))

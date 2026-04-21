@@ -130,14 +130,73 @@ class FileStructureMetadata:
         }
 
 
+STRUCTURE_RECORD_FIELDS: List[str] = [
+    "label", "file", "sheet_name", "sheet_selection",
+    "status", "status_description", "is_actionable",
+    "data_row_count", "total_rows", "total_cols",
+    "header_rows", "header_range", "data_range",
+    "merged_regions", "blank_columns", "hidden_columns",
+]
+"""Canonical column order for DataFrames built from FileStructureMetadata.summary_record()."""
+
+
 @dataclass
 class FileProcessingConfig:
+    """Per-file processing parameters for structure detection and data loading.
+
+    All fields are optional — the framework auto-detects sensible defaults.
+    Only supply values when auto-detection cannot determine the correct behaviour.
+
+    Args:
+        sheet_name: Name of the sheet to process. Required when a file has more
+            than one visible sheet — the framework returns SHEET_NOT_SPECIFIED
+            otherwise. Auto-selects when only one visible sheet exists.
+        static_header_rows: 1-based row numbers that form the header, e.g. ``[1, 2]``
+            for a two-row header. Use when header rows contain merged cells — openpyxl
+            reads merged siblings as None, making the row appear sparse and causing
+            auto-detection to skip it.
+        data_start_row: 1-based row where data begins. Set to ``1`` when the sheet
+            has no header row (raw data from row 1). Inferred from static_header_rows
+            or auto-detection when omitted.
+        ignore_rows: 1-based row numbers to skip during data loading, e.g. ``[21, 22]``
+            to exclude footer or totals rows. Applied at load time only — does not
+            affect structure or metadata detection.
+        ignore_row_ranges: Row ranges to skip as a list of ``(start, end)`` tuples,
+            e.g. ``[(20, 22)]`` skips rows 20–22 inclusive. Applied at load time only.
+        ignore_columns: 1-based column indices to exclude entirely, e.g. ``[3, 7]``.
+        max_rows_to_scan: Maximum rows scanned during header auto-detection (default 20).
+            Increase only if header rows appear beyond row 20.
+        header_population_threshold: Fraction of non-empty cells required for a row
+            to be considered a header candidate (default 0.3). Lower this value if
+            sparse header rows are being incorrectly skipped.
+
+    Examples::
+
+        # Single sheet file — defaults work for most files
+        config = FileProcessingConfig()
+
+        # Multi-sheet file — sheet_name is mandatory
+        config = FileProcessingConfig(sheet_name="Orders")
+
+        # Multi-row merged headers (e.g. section label row + column name row)
+        config = FileProcessingConfig(sheet_name="UK", static_header_rows=[1, 2])
+
+        # File with no headers — data starts at row 1
+        config = FileProcessingConfig(data_start_row=1)
+
+        # Skip footer rows at load time
+        config = FileProcessingConfig(ignore_rows=[21, 22])
+
+        # Build from a Delta override table row — no code change needed
+        config = FileProcessingConfig.from_override(delta_row)
+    """
+
     sheet_name: Optional[str] = None
-    static_header_rows: Optional[List[int]] = None   # 1-based; if known, skip auto-detect
-    data_start_row: Optional[int] = None             # 1-based; if known, skip auto-detect
-    ignore_rows: Optional[List[int]] = None          # 1-based rows to skip
+    static_header_rows: Optional[List[int]] = None
+    data_start_row: Optional[int] = None
+    ignore_rows: Optional[List[int]] = None
     ignore_row_ranges: Optional[List[Tuple[int, int]]] = None
-    ignore_columns: Optional[List[int]] = None       # 1-based
+    ignore_columns: Optional[List[int]] = None
     max_rows_to_scan: int = 20
     header_population_threshold: float = 0.3
 

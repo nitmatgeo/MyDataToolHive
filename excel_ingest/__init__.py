@@ -30,8 +30,8 @@ Quick start::
 """
 
 from excel_ingest.framework import ExcelIngestFramework, IngestResult
-from excel_ingest.validation import FileValidationResult, ValidationStatus
-from excel_ingest.structure import FileStructureMetadata, FileProcessingConfig, FileStatus
+from excel_ingest.validation import FileValidationResult, ValidationStatus, VALIDATION_RECORD_FIELDS
+from excel_ingest.structure import FileStructureMetadata, FileProcessingConfig, FileStatus, STRUCTURE_RECORD_FIELDS
 from excel_ingest.metadata import MetadataExtractionResult, combine_column_records, build_superset_schema, COLUMN_RECORD_FIELDS, SIGNATURE_RECORD_FIELDS
 from excel_ingest.loader import LoadResult
 from excel_ingest.mapping import map_to_canonical, CanonicalMapping, MappingStatus, MappingMethod
@@ -41,9 +41,11 @@ __all__ = [
     "IngestResult",
     "FileValidationResult",
     "ValidationStatus",
+    "VALIDATION_RECORD_FIELDS",
     "FileStructureMetadata",
     "FileProcessingConfig",
     "FileStatus",
+    "STRUCTURE_RECORD_FIELDS",
     "MetadataExtractionResult",
     "combine_column_records",
     "build_superset_schema",

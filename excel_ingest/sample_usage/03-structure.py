@@ -22,7 +22,7 @@ VOLUME_PATH   = f"/Volumes/{MY_CATALOG}/{INGEST_SCHEMA}/{VOLUME_NAME}"
 # COMMAND ----------
 
 # DBTITLE 1,Initialise Framework
-from excel_ingest import ExcelIngestFramework
+from excel_ingest import ExcelIngestFramework, STRUCTURE_RECORD_FIELDS
 from excel_ingest.structure import FileProcessingConfig
 
 framework = ExcelIngestFramework(spark=spark)
@@ -116,7 +116,7 @@ for cfg in FILE_CONFIGS:
     s    = framework.detect_structure(path, config=cfg["config"], password=cfg["password"])
     all_structure.append(s.summary_record(file_path=cfg["file"], label=cfg["label"]))
 
-display(spark.createDataFrame(all_structure))
+display(spark.createDataFrame(all_structure).select(STRUCTURE_RECORD_FIELDS))
 
 # COMMAND ----------
 
@@ -124,4 +124,4 @@ display(spark.createDataFrame(all_structure))
 # Rows where is_actionable = True must be resolved before metadata extraction can proceed.
 # Read status_description for the recommended fix.
 
-spark.createDataFrame(all_structure).filter("is_actionable = true").display()
+spark.createDataFrame(all_structure).select(STRUCTURE_RECORD_FIELDS).filter("is_actionable = true").display()
