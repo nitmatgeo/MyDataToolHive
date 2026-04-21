@@ -4,11 +4,11 @@
 
 A PyPI-publishable Python package (`databricks-excel-ingest-framework`, import: `excel_ingest`)
 for Excel file ingestion on Databricks. Supersedes `Excel-Ingestion-DBXFramework/` — that folder
-will be deleted once this is complete. Version: `0.1.0a17` (pre-release alpha 16).
+will be deleted once this is complete. Version: `0.1.0a18` (pre-release alpha 18).
 
 Primary target is Databricks (Unity Catalog Volumes, DBFS, Foundation Models). Core modules
 (validation, structure, metadata) are platform-independent — openpyxl only, no Databricks
-dependency. LLM mapping adapters are optional extras. Version: `0.1.0a17` (pre-release alpha 16, last published: a13).
+dependency. LLM mapping adapters are optional extras. Version: `0.1.0a18` (pre-release alpha 18, last published: a13).
 
 ---
 
@@ -25,8 +25,11 @@ dependency. LLM mapping adapters are optional extras. Version: `0.1.0a17` (pre-r
 | `excel_ingest/__init__.py` | Package exports + version |
 | `excel_ingest/framework.py` | `ExcelIngestFramework` — main orchestration class |
 | `excel_ingest/validation.py` | Stage 1 — file validation (existence, format, password, sheets) |
-| `excel_ingest/structure.py` | Stage 2 — header/structure detection (merged cells, multi-row) |
+| `excel_ingest/structure.py` | Stage 2 — header/structure detection (merged cells, multi-row); `FileProcessingConfig.from_override()` |
 | `excel_ingest/metadata.py` | Stage 3 — hierarchical metadata extraction + SHA-256 signature |
+| `excel_ingest/loader.py` | Stage 5 — load data rows as Spark DataFrame; `LoadResult`, `load_excel_data()`, `combine_results()` |
+| `excel_ingest/sample_usage/05-load.py` | Sample: load patterns — single sheet, multi-sheet, combine |
+| `excel_ingest/sample_usage/06.BETA-mapping.py` | Sample (BETA): optional silver mapping utility |
 | `excel_ingest/mapping/__init__.py` | Mapping submodule exports |
 | `excel_ingest/mapping/engine.py` | Stage 4 — mapping orchestration (rule + optional LLM) |
 | `excel_ingest/mapping/confidence.py` | Confidence scoring, thresholds, MappingStatus enum |
@@ -37,21 +40,26 @@ dependency. LLM mapping adapters are optional extras. Version: `0.1.0a17` (pre-r
 | `excel_ingest/mapping/adapters/anthropic.py` | Anthropic Messages adapter |
 | `excel_ingest/utils/__init__.py` | Utils exports |
 | `excel_ingest/utils/paths.py` | `FileLocationType` enum + `detect_location_type()` |
-| `excel_ingest/sample_usage/` | Numbered sample notebooks (01–05) |
+| `excel_ingest/sample_usage/` | Sample notebooks: 01–05 (core), 06.BETA (mapping) |
 
 ---
 
 ## Architecture
 
 ```
-ExcelIngestFramework(spark, catalog, schema, adapter)
-├── .validate(file_path, password)               → FileValidationResult
-├── .detect_structure(file_path, config, password) → FileStructureMetadata
-├── .extract_metadata(file_path, structure, file_id, password) → MetadataExtractionResult
-├── .map_to_canonical(metadata, canonical_dict, country_code)  → List[CanonicalMapping]
-├── .ingest(file_path, canonical_dict, ...)       → IngestResult  [full pipeline]
-├── .guide()                                      → None  [step-by-step usage printed to stdout]
-└── .sample_usage(spark)                          → str   [extracts bundled notebooks to Workspace]
+ExcelIngestFramework(spark, adapter)
+├── .validate(file_path, password)                          → FileValidationResult
+├── .detect_structure(file_path, config, password)          → FileStructureMetadata
+├── .extract_metadata(file_path, structure, file_id, ...)   → MetadataExtractionResult
+├── .load(file_path, structure, metadata, ...)              → LoadResult   [result.df = Spark DataFrame]
+├── .combine(results)                                       → DataFrame    [union + NULL-fill]
+├── .map_to_canonical(metadata, canonical_dict, ...)        → List[CanonicalMapping]  [silver utility]
+├── .ingest(file_path, canonical_dict, ...)                 → IngestResult [full pipeline stages 1-4]
+├── .guide()                                                → None  [step-by-step usage printed]
+└── .sample_usage(spark)                                    → str   [extracts bundled notebooks]
+
+FileProcessingConfig
+└── .from_override(dict_or_row)                             → FileProcessingConfig  [from Delta table row]
 
 LLM adapters (all optional):
 ├── DatabricksAdapter(model="databricks-llama-3-70b-instruct", host=None)

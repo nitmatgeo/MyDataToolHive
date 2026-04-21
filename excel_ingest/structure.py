@@ -139,6 +139,78 @@ class FileProcessingConfig:
     max_rows_to_scan: int = 20
     header_population_threshold: float = 0.3
 
+    @classmethod
+    def from_override(cls, overrides) -> "FileProcessingConfig":
+        """Build a FileProcessingConfig from a dict or Spark Row of override values.
+
+        Designed for loading per-file processing parameters from a Delta override
+        table so teams can manage config as data without touching code.
+
+        Keys match FileProcessingConfig field names. Missing or None values are
+        skipped — the framework falls back to auto-detection for those fields.
+        Only non-None values in overrides are applied.
+
+        List fields (static_header_rows, ignore_rows, ignore_columns) accept Python
+        lists, Spark ArrayType values, or bracket-notation strings like "[1, 2, 3]".
+        ignore_row_ranges must be set programmatically (complex nested type).
+
+        Example — Delta override table pattern::
+
+            overrides_df  = spark.table("my_catalog.config.excel_overrides")
+            overrides_map = {
+                row["file_name"]: FileProcessingConfig.from_override(row)
+                for row in overrides_df.collect()
+            }
+
+            for cfg in FILE_CONFIGS:
+                config    = overrides_map.get(cfg["file"], FileProcessingConfig())
+                structure = framework.detect_structure(path, config=config)
+                meta      = framework.extract_metadata(path, structure)
+                result    = framework.load(path, structure, meta, config=config)
+        """
+        if hasattr(overrides, "asDict"):
+            overrides = overrides.asDict()
+        else:
+            overrides = dict(overrides)
+
+        def _as_int_list(val: object) -> Optional[List[int]]:
+            if val is None:
+                return None
+            if isinstance(val, (list, tuple)):
+                parsed = [int(x) for x in val]
+                return parsed or None
+            if isinstance(val, str):
+                cleaned = val.strip("[] ").replace(" ", "")
+                if not cleaned:
+                    return None
+                return [int(x) for x in cleaned.split(",") if x]
+            return None
+
+        def _as_int(val: object) -> Optional[int]:
+            try:
+                return int(val) if val is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        def _as_float(val: object, default: float) -> float:
+            try:
+                return float(val) if val is not None else default
+            except (TypeError, ValueError):
+                return default
+
+        return cls(
+            sheet_name=overrides.get("sheet_name") or None,
+            static_header_rows=_as_int_list(overrides.get("static_header_rows")),
+            data_start_row=_as_int(overrides.get("data_start_row")),
+            ignore_rows=_as_int_list(overrides.get("ignore_rows")),
+            ignore_row_ranges=None,  # complex nested type — set programmatically if needed
+            ignore_columns=_as_int_list(overrides.get("ignore_columns")),
+            max_rows_to_scan=_as_int(overrides.get("max_rows_to_scan")) or 20,
+            header_population_threshold=_as_float(
+                overrides.get("header_population_threshold"), 0.3
+            ),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Internal detection helpers

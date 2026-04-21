@@ -14,6 +14,9 @@ from excel_ingest.structure import (
 )
 from excel_ingest.validation import FileValidationResult, ValidationStatus, validate_excel_file
 
+# LoadResult imported lazily inside load() / combine() to keep pyspark optional
+# for callers who only use stages 1–4 without loading data into DataFrames.
+
 
 @dataclass
 class IngestResult:
@@ -256,6 +259,107 @@ class ExcelIngestFramework:
         )
 
     # ------------------------------------------------------------------
+    # Stage 5 — Load data
+    # ------------------------------------------------------------------
+
+    def load(
+        self,
+        file_path: str,
+        structure: FileStructureMetadata,
+        metadata: MetadataExtractionResult,
+        password: Optional[str] = None,
+        config: Optional[FileProcessingConfig] = None,
+        skip_hidden_columns: bool = False,
+    ) -> "LoadResult":
+        """Load data rows from an Excel sheet as a Spark DataFrame.
+
+        Returns a LoadResult with result.df — a Spark DataFrame containing all
+        loadable columns named using db_canonical_bronze_column_name (STRING),
+        plus three auto-columns appended to every row:
+          - source_file       : filename (basename only)
+          - source_sheet      : sheet name
+          - insert_timestamp  : datetime when load() was called
+
+        All values land as STRING — cast to correct types in the silver layer.
+
+        Args:
+            file_path:            Path to the Excel file (Volume, DBFS, or local).
+            structure:            Output of detect_structure() for this file + sheet.
+            metadata:             Output of extract_metadata() for this file + sheet.
+            password:             Password for AES-encrypted files.
+            config:               Optional FileProcessingConfig — only needed when
+                                  ignore_rows / ignore_row_ranges overrides are
+                                  required at load time. Build from a Delta override
+                                  table using FileProcessingConfig.from_override(row).
+            skip_hidden_columns:  Exclude hidden columns from result.df (default False).
+
+        Raises:
+            RuntimeError: If no SparkSession was passed to the framework constructor.
+
+        Example::
+
+            structure = framework.detect_structure(path, config=config)
+            meta      = framework.extract_metadata(path, structure, file_id="S01")
+            result    = framework.load(path, structure, meta)
+            result.df.write.mode("append").saveAsTable("bronze.sales")
+        """
+        if self.spark is None:
+            raise RuntimeError(
+                "framework.load() requires a SparkSession. "
+                "Pass spark= when constructing ExcelIngestFramework."
+            )
+        from excel_ingest.loader import load_excel_data
+        return load_excel_data(
+            file_path=file_path,
+            structure=structure,
+            metadata=metadata,
+            spark=self.spark,
+            password=password,
+            config=config,
+            skip_hidden_columns=skip_hidden_columns,
+        )
+
+    def combine(self, results: List["LoadResult"]) -> Any:
+        """Union multiple LoadResult DataFrames into one, NULL-filling missing columns.
+
+        Computes the full bronze column union across all results. Any column
+        present in some files but not others is added as NULL STRING. Auto-columns
+        (source_file, source_sheet, insert_timestamp) are always at the end.
+
+        Use this when ingesting multiple files with different column sets into one
+        consolidated Delta table. For files with completely different schemas, load
+        each into its own table instead — combine() makes no compatibility checks.
+
+        Args:
+            results: List of LoadResult from framework.load(). Row order is preserved
+                     within each result; results are stacked in list order.
+
+        Returns:
+            pyspark.sql.DataFrame — columns sorted alphabetically then auto-columns.
+
+        Raises:
+            RuntimeError: If no SparkSession was passed to the framework constructor.
+            ValueError:   If results is empty.
+
+        Example::
+
+            all_results = []
+            for cfg in FILE_CONFIGS:
+                result = framework.load(path, structure, meta)
+                all_results.append(result)
+
+            combined_df = framework.combine(all_results)
+            combined_df.write.mode("append").saveAsTable("bronze.all_regional_sales")
+        """
+        if self.spark is None:
+            raise RuntimeError(
+                "framework.combine() requires a SparkSession. "
+                "Pass spark= when constructing ExcelIngestFramework."
+            )
+        from excel_ingest.loader import combine_results
+        return combine_results(results, self.spark)
+
+    # ------------------------------------------------------------------
     # Developer helpers
     # ------------------------------------------------------------------
 
@@ -407,6 +511,57 @@ STAGE-BY-STAGE (for debugging or inspection)
   s        = framework.detect_structure(file_path, config=config)    # Stage 2
   meta     = framework.extract_metadata(file_path, s, file_id="x")  # Stage 3
   mappings = framework.map_to_canonical(meta, canonical_dict)        # Stage 4
+
+STEP 8 — Load actual data rows into a Spark DataFrame
+───────────────────────────────────────────────────────
+  result = framework.load(
+      file_path  = path,
+      structure  = structure,       # from detect_structure()
+      metadata   = meta,            # from extract_metadata()
+      # password = "secret",        # password-protected files
+      # config   = override_config, # FileProcessingConfig with ignore_rows etc.
+      # skip_hidden_columns = True, # exclude Excel hidden columns (default: False)
+  )
+
+  result.df      # Spark DataFrame — bronze column names + 3 auto-columns
+  result.df.printSchema()
+  display(result.df)
+
+  # Auto-columns always present at the end of result.df:
+  #   source_file      (STRING)     — filename, not full path
+  #   source_sheet     (STRING)     — sheet name
+  #   insert_timestamp (TIMESTAMP)  — datetime when load() was called
+
+  result.df.write.mode("append").saveAsTable("bronze.sales")
+
+  # Override per-file config from a Delta table (no code change needed):
+  overrides_df  = spark.table("my_catalog.config.excel_overrides")
+  overrides_map = {
+      row["file_name"]: FileProcessingConfig.from_override(row)
+      for row in overrides_df.collect()
+  }
+  config = overrides_map.get(filename, FileProcessingConfig())
+  result = framework.load(path, structure, meta, config=config)
+
+STEP 9 — Combine multiple files into one DataFrame
+─────────────────────────────────────────────────────
+  # Use when multiple files share a similar column structure and should land
+  # in the same Delta table. Missing columns are NULL-filled automatically.
+  all_results = []
+  for cfg in FILE_CONFIGS:
+      path      = f"{VOLUME_PATH}/{cfg['file']}"
+      structure = framework.detect_structure(path, config=cfg["config"])
+      meta      = framework.extract_metadata(path, structure)
+      result    = framework.load(path, structure, meta)
+      all_results.append(result)
+
+  combined_df = framework.combine(all_results)
+  display(combined_df)
+  combined_df.write.mode("append").saveAsTable("bronze.all_regional_sales")
+
+  # For files with completely different schemas — keep them separate instead:
+  for cfg, result in zip(FILE_CONFIGS, all_results):
+      result.df.write.mode("append").saveAsTable(cfg["table"])
 
 OTHER METHODS
 ─────────────

@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.0a18] — 2026-04-21
+
+### Added
+- **`framework.load()`** (`framework.py`, `loader.py`): New Stage 5 — reads actual Excel
+  data rows and returns a `LoadResult` with `result.df` (Spark DataFrame). All bronze
+  columns land as `STRING`; three auto-columns are always appended: `source_file`,
+  `source_sheet`, `insert_timestamp`. Supports `password`, `skip_hidden_columns`, and an
+  optional `config` for `ignore_rows` / `ignore_row_ranges` overrides at load time.
+- **`framework.combine(results)`** (`framework.py`, `loader.py`): Unions a list of
+  `LoadResult` DataFrames into one, NULL-filling bronze columns absent from individual
+  files. Column order is alphabetical bronze columns then auto-columns. No compatibility
+  check — caller is responsible for combining files with a meaningful shared schema.
+- **`LoadResult`** (`loader.py`): New dataclass returned by `framework.load()`. Fields:
+  `df` (Spark DataFrame), `metadata` (MetadataExtractionResult), `messages` (List[str]).
+  Convenience properties: `result.source_file`, `result.source_sheet`.
+- **`FileProcessingConfig.from_override(row)`** (`structure.py`): Classmethod that builds
+  a `FileProcessingConfig` from a dict or Spark Row. Designed for loading per-file
+  processing parameters from a Delta override table. Handles list fields stored as Python
+  lists, Spark `ArrayType` values, or bracket-notation strings (`"[1, 2]"`). Missing or
+  `None` keys fall back to auto-detection.
+- **`06-load.py`** sample notebook: Demonstrates all four load patterns — single file
+  single sheet, single file all sheets, multiple files separate, multiple files combined.
+  Includes manual dict override, row-skip override, and Delta table override pattern.
+- **`LoadResult` export** in `excel_ingest/__init__.py`.
+
 ## [0.1.0a17] — 2026-04-21
 
 ### Fixed
