@@ -1,0 +1,34 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment
+.env
+.venv
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Office temp files (Word/Excel lock files created while a document is open)
+~$*
+# Word auto-recovery / backup files (e.g. ~WRL0453.tmp)
+~WRL*.tmp
+~WRD*.tmp
+
