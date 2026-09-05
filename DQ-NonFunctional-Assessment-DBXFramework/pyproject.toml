@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "databricks-dq-framework"
+version = "1.0.39"
+description = "Metadata-driven Data Quality Assessment Framework for Databricks / Delta Lake"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "Nitin Mathew George" }
+]
+keywords = ["databricks", "delta-lake", "data-quality", "pyspark", "dq-framework"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "python-dateutil>=2.8",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+standalone = [
+    "pyspark>=3.3",
+    "delta-spark>=2.0",
+]
+dev = ["pytest>=7", "pytest-cov"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dq_framework*"]
+
+[tool.setuptools.package-data]
+"dq_framework" = ["sample_usage/*"]

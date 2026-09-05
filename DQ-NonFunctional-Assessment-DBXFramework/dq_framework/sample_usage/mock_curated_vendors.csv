@@ -1,0 +1,216 @@
+vendor_id,vendor_code,vendor_name,first_name,last_name,trade_type,location_id,contact_point_id
+10001,ACME/WH001-001,Liam Smith,Liam,Smith,Wholesale_001,50002,70002
+10002,ACME/CS002-002,Olivia Jackson,Olivia,Jackson,Consulting_002,50003,70003
+10003,vnd/PH003-001,Noah Johnson,99999,Johnson,Pharma_003,50004,70004
+10004,ACME/HC004-004,Ethan Thomas,Ethan,Thomas,Healthcare_004,50005,70005
+10005,ACME/GN005-005,Sarah Nair,Sarah,Nair,,50006,70006
+10006,ACME/WH006-006,Northwind Holdings 006,,,Wholesale_006,50007,70007
+10007,ACME/WH007-001,Ananya Smith,Ananya,Smith,Wholesale_007,50008,70008
+10008,ACME/FN008-002,Emma Martin,Emma,Martin,Finance_008,50009,70009
+10009,ACME/RT009-003,Tailspin Corp 009,,,Retail_009,50010,70010
+10010,ACME-FN010-002,Northwind Co 010,,,Finance_010,50011,70011
+10011,ACME/CS011-005,Ethan Brown,Ethan,Brown,Consulting_011,50012,70012
+10012,ACME/FN012-006,Wide World Importers Inc 012,,,Finance_012,50013,70013
+10013,ACME/WH013-001,Michael Johnson,Michael,Johnson,Wholesale_013,50014,70014
+10014,ACME/FN014-002,Noah Sharma,Noah,nullnullnull,Finance_014,50015,70015
+10015,ACME/HC015-003,Jacob Harris,123,Harris,Healthcare_015,50016,70016
+10016,ACME/FN016-004,Sarah Garcia,Sarah,Garcia,Finance_016,50017,70017
+10017,ACME/ED017-005,Isabella Walker,Isabella,Walker,Education_017,50018,70018
+10018,ACME/MF018-006,Mia Garcia,Mia,Garcia,Manufacturing_018,50019,70019
+10019,ACME/WH019-001,Ananya Martin,Ananya,Martin,Wholesale_019,50020,70020
+10020,ACME/wh020-003,Arjun Johnson,Arjun,Johnson2,Wholesale_020,50021,70021
+10021,ACME/ON021-002,Emma Brown,Emma,Brown,Online_021,50022,70022
+10022,ACME/ON022-003,Adventure Ltd 022,,,Online_022,50023,70023
+10023,ACME/CS023-004,Mia Nair,Mia,Nair,Consulting_023,50024,70024
+10024,ACME/WH024-005,Arjun Johnson,Arjun,Johnson,Wholesale_024,50025,70025
+10025,ACME/GN025-006,Rahul Hall,Rahul,Hall,aaaaaaaaaa,50026,70026
+10026,ACME/ED026-001,Jacob Thomas,Jacob,Thomas,Education_026,50027,70027
+10027,ACME/HC027-002,Mia Garcia,Mia,Garcia,Healthcare_027,50028,70028
+10028,ACME/WH028-003,Sarah Hall,Sarah,Hall,Wholesale_028,50029,70029
+10029,ACME/FN029-004,Adventure Ltd 029,,,Finance_029,50030,70030
+10030,123/FN030-004,A. Datum Solutions 030,,,Finance_030,50031,70031
+10031,ACME/PH031-006,Noah Martin,Noah,Martin,Pharma_031,50032,70032
+10032,ACME/LG032-001,Ananya Sharma,Ananya,Sharma,Logistics_032,50033,70033
+10033,ACME/PH033-002,Ananya Hall,Ananya,Hall,Pharma_033,50034,70034
+10034,ACME/LG034-003,Proseware LLC 034,,,Logistics_034,50035,70035
+10035,ACME/LG035-004,Litware Co 035,,,Logistics_035,50036,70036
+10036,ACME/ON036-005,Northwind Corp 036,,,Online_036,50037,70037
+10037,ACME/WH037-006,Northwind Co 037,,,Wholesale_037,50038,70038
+10038,ACME/LG038-001,Rahul Smith,Rahul,Smith,Logistics_038,50039,70039
+10039,ACME/HC039-002,Fabrikam Co 039,,,Healthcare_039,50040,70040
+10040,ACME/ED1234-005,Wide World Importers Co 040,,,Education_040,50041,70041
+10041,ACME/RT041-004,Sarah Sharma,Sarah,Sharma,Retail_041,50042,70042
+10042,ACME/MF042-005,Michael Harris,Michael,Harris,Manufacturing_042,50043,70043
+10043,ACME/PH043-006,Adventure Co 043,,,Pharma_043,50044,70044
+10044,ACME/HC044-001,Tailspin Holdings 044,,,Healthcare_044,50045,70045
+10045,ACME/WH045-002,Ravi Martin,Ravi,Martin,Wholesale_045,50046,70046
+10046,ACME/WH046-003,Liam Hall,0000,Hall,Wholesale_046,50047,70047
+10047,ACME/MF047-004,Kiran Singh,Kiran,Singh,Manufacturing_047,50048,70048
+10048,ACME/ED048-005,Sophia Martin,Sophia,Martin,Education_048,50049,70049
+10049,ACME/ED049-006,Ethan Walker,Ethan,Walker,Education_049,50050,70050
+10050,ACME/HC50-006,Sarah Brown,Sarah,Brown,Healthcare_050,50051,70051
+10051,VND/WH051-001,Arjun Patel,Arjun,Patel,Wholesale_051,50052,70052
+10052,VND/WH052-002,A. Datum Holdings 052,,,Wholesale_052,50053,70053
+10053,VND/MF053-003,Northwind Holdings 053,,,Manufacturing_053,50054,70054
+10054,VND/FN054-004,Isabella Patel,Isabella,Patel,Finance_054,50055,70055
+10055,VND/PH055-005,Rahul Jackson,Rahul,Jackson,Pharma_055,50056,70056
+10056,VND/ON056-006,Michael Smith,Michael,Smith,Online_056,50057,70057
+10057,VND/PH057-001,Ethan Martin,Ethan,Martin,Pharma_057,50058,70058
+10058,VND/PH058-002,Isabella Anderson,Isabella,Anderson,Pharma_058,50059,70059
+10059,VND/MF059-003,Arjun Sharma,Arjun,Sharma,Manufacturing_059,50060,70060
+10060,VND/3H060-007,Adventure Solutions 060,,,Healthcare_060,50061,70061
+10061,VND/ED061-005,Tailspin Corp 061,,,Education_061,50062,70062
+10062,VND/ON062-006,Contoso Group 062,,,Online_062,50063,70063
+10063,VND/WH063-001,Tailspin Group 063,,,Wholesale_063,50064,70064
+10064,VND/PH064-002,Wide World Importers Inc 064,,,Pharma_064,50065,70065
+10065,VND/HC065-003,Liam Martin,Liam,testtesttest,Healthcare_065,50066,70066
+10066,VND/WH066-004,Olivia Kumar,Olivia,Kumar,Wholesale_066,50067,70067
+10067,VND/WH067-005,Arjun Jackson,Arjun,Jackson,Wholesale_067,50068,70068
+10068,VND/ON068-006,Ethan Patel,Ethan,Patel,Online_068,50069,70069
+10069,VND/RT069-001,Adventure Group 069,,,Retail_069,50070,70070
+10070,VND/HC070-08,Ava Johnson,12345678,Johnson,Healthcare_070,50071,70071
+10071,VND/HC071-003,Proseware Co 071,,,Healthcare_071,50072,70072
+10072,VND/LG072-004,Emma Patel,Emma,Patel,Logistics_072,50073,70073
+10073,VND/FN073-005,Ravi Lee,Ravi,Lee,Finance_073,50074,70074
+10074,VND/HC074-006,Mia Anderson,Mia,Anderson,Healthcare_074,50075,70075
+10075,VND/ON075-001,Arjun Smith,Arjun,Smith,Online_075,50076,70076
+10076,VND/LG076-002,David Jackson,David,Jackson,Logistics_076,50077,70077
+10077,VND/LG077-003,Arjun Sharma,Arjun,Sharma,Logistics_077,50078,70078
+10078,VND/PH078-004,Priya Johnson,Priya,Johnson,Pharma_078,50079,70079
+10079,VND/PH079-005,Jacob Lee,Jacob,Lee,Pharma_079,50080,70080
+10080,VND/WH080-1234,A. Datum Group 080,,,Wholesale_080,50081,70081
+10081,FIN/FN081-001,Fabrikam Inc 081,,,Finance_081,50082,70082
+10082,FIN/HC082-002,Fabrikam Ltd 082,,,Healthcare_082,50083,70083
+10083,FIN/FN083-003,Contoso Group 083,,,Finance_083,50084,70084
+10084,FIN/CS084-004,Ravi Jackson,Ravi,Jackson,Consulting_084,50085,70085
+10085,FIN/CS085-005,Proseware Ltd 085,,,Consulting_085,50086,70086
+10086,FIN/CS086-006,Kiran Anderson,Kiran,Anderson,Consulting_086,50087,70087
+10087,FIN/FN087-001,Rahul Anderson,Rahul,Anderson,Finance_087,50088,70088
+10088,FIN/MF088-002,Northwind Inc 088,,,Manufacturing_088,50089,70089
+10089,FIN/ON089-003,Sophia Hall,Sophia,Hall,Online_089,50090,70090
+10090,FINANCECODE/FN090-010,Priya Nair,Priya,2024-01-15,Finance_090,50091,70091
+10091,FIN/HC091-005,Sophia Harris,Sophia,Harris,Healthcare_091,50092,70092
+10092,FIN/ON092-006,Wide World Importers Ltd 092,,,Online_092,50093,70093
+10093,FIN/MF093-001,Priya White,Priya,White,Manufacturing_093,50094,70094
+10094,FIN/WH094-002,Isabella Thomas,Isabella,Thomas,Wholesale_094,50095,70095
+10095,FIN/WH095-003,Ava Iyer,Ava,Iyer,Wholesale_095,50096,70096
+10096,FIN/ON096-004,A. Datum Ltd 096,,,Online_096,50097,70097
+10097,FIN/MF097-005,Proseware Holdings 097,,,Manufacturing_097,50098,70098
+10098,FIN/ON098-006,Litware Group 098,,,Online_098,50099,70099
+10099,FIN/MF099-001,Noah Patel,Noah,Patel,Manufacturing_099,50100,70100
+10100,FINLG100-011,Liam Brown,Liam,Brown@2,Logistics_100,50101,70101
+10101,FIN/ED101-003,Ravi Johnson,Ravi,Johnson,Education_101,50102,70102
+10102,FIN/HC102-004,Contoso Ltd 102,,,Healthcare_102,50103,70103
+10103,FIN/CS103-005,Michael Brown,Michael,Brown,Consulting_103,50104,70104
+10104,FIN/RT104-006,Adventure Holdings 104,,,Retail_104,50105,70105
+10105,FIN/ON105-001,David Iyer,David,Iyer,Online_105,50106,70106
+10106,FIN/FN106-002,Tailspin Corp 106,,,Finance_106,50107,70107
+10107,FIN/WH107-003,Contoso LLC 107,,,Wholesale_107,50108,70108
+10108,FIN/PH108-004,Priya Singh,Priya,Singh,Pharma_108,50109,70109
+10109,FIN/FN109-005,Northwind Group 109,,,Finance_109,50110,70110
+10110,,Wide World Importers Corp 110,,,Online_110,50111,70111
+10111,FIN/FN111-001,Sarah Martin,Sarah,Martin,Finance_111,50112,70112
+10112,FIN/FN112-002,David Sharma,David,Sharma,Finance_112,50113,70113
+10113,FIN/ON113-003,Liam Johnson,Liam,Johnson,Online_113,50114,70114
+10114,FIN/FN114-004,David Garcia,David,Garcia,Finance_114,50115,70115
+10115,FIN/FN115-005,A. Datum Ltd 115,,,Finance_115,50116,70116
+10116,FIN/FN116-006,Mia Kumar,Mia,Kumar,Finance_116,50117,70117
+10117,FIN/FN117-001,Ananya Patel,Ananya,Patel,Finance_117,50118,70118
+10118,FIN/HC118-002,Sarah Patel,Sarah,Patel,Healthcare_118,50119,70119
+10119,FIN/HC119-003,Noah Iyer,Noah,Iyer,Healthcare_119,50120,70120
+10120,F/PH120-012,David White,David,White,Pharma_120,50121,70121
+10121,ORG/PH121-005,Noah Walker,Noah,Walker,Pharma_121,50122,70122
+10122,ORG/MF122-006,Emma Patel,Emma,Patel,Manufacturing_122,50123,70123
+10123,ORG/ED123-001,Adventure Ltd 123,,,Education_123,50124,70124
+10124,ORG/MF124-002,Ethan Sharma,Ethan,Sharma,Manufacturing_124,50125,70125
+10125,ORG/FN125-003,Sophia Nair,Sophia,Nair,Finance_125,50126,70126
+10126,ORG/LG126-004,Kiran Iyer,Kiran,Iyer,Logistics_126,50127,70127
+10127,ORG/FN127-005,Fabrikam LLC 127,,,Finance_127,50128,70128
+10128,ORG/HC128-006,A. Datum LLC 128,,,Healthcare_128,50129,70129
+10129,ORG/CS129-001,Liam Kumar,Liam,Kumar,Consulting_129,50130,70130
+10130,ORG/LG130.001,Litware Holdings 130,,,Logistics_130,50131,70131
+10131,ORG/FN131-003,Tailspin Holdings 131,,,Finance_131,50132,70132
+10132,ORG/ED132-004,Noah Taylor,Noah,Taylor,Education_132,50133,70133
+10133,ORG/GN133-005,Ravi Patel,Ravi,Patel,,50134,70134
+10134,ORG/LG134-006,Liam Iyer,Liam,Iyer,Logistics_134,50135,70135
+10135,ORG/LG135-001,Proseware Ltd 135,,,Logistics_135,50136,70136
+10136,ORG/WH136-002,Kiran Johnson,Kiran,Johnson,Wholesale_136,50137,70137
+10137,ORG/MF137-003,Proseware Group 137,,,Manufacturing_137,50138,70138
+10138,ORG/LG138-004,Wide World Importers Group 138,,,Logistics_138,50139,70139
+10139,ORG/PH139-005,Jacob Walker,Jacob,Walker99,Pharma_139,50140,70140
+10140,ORG/FN140-00A,Ananya Johnson,Ananya,Johnson,Finance_140,50141,70141
+10141,ORG/HC141-001,Kiran Hall,Kiran,Hall,Healthcare_141,50142,70142
+10142,ORG/WH142-002,Isabella Thomas,Isabella,Thomas,Wholesale_142,50143,70143
+10143,ORG/ED143-003,Jacob Sharma,Jacob,Sharma,Education_143,50144,70144
+10144,ORG/LG144-004,Fabrikam Holdings 144,,,Logistics_144,50145,70145
+10145,ORG/CS145-005,Contoso Ltd 145,,,Consulting_145,50146,70146
+10146,ORG/WH146-006,Neha Johnson,Neha,Johnson,Wholesale_146,50147,70147
+10147,ORG/ON147-001,Jacob Kumar,Jacob,Kumar,Online_147,50148,70148
+10148,ORG/RT148-002,Emma Brown,Emma,Brown,Retail_148,50149,70149
+10149,ORG/FN149-003,Noah Iyer,Noah,Iyer,Finance_149,50150,70150
+10150,ORG/ON150-004,Arjun Singh,Arjun,Singh,Online_150,50151,70151
+10151,ORG/ED151-005,Jacob Patel,Jacob,Patel,Education_151,50152,70152
+10152,ORG/CS152-006,Arjun Nair,Arjun,Nair,Consulting_152,50153,70153
+10153,ORG/ON153-001,Litware Holdings 153,,,Online_153,50154,70154
+10154,ORG/WH154-002,Proseware Inc 154,,,Wholesale_154,50155,70155
+10155,ORG/FN155-003,Ethan Garcia,Ethan,Garcia,Finance_155,50156,70156
+10156,ORG/HC156-004,Mia Garcia,Mia,Garcia,Healthcare_156,50157,70157
+10157,ORG/LG157-005,Rahul Lee,Rahul,Lee,Logistics_157,50158,70158
+10158,ORG/WH158-006,Noah Walker,Noah,Walker,Wholesale_158,50159,70159
+10159,ORG/ED159-001,Northwind Co 159,,,Education_159,50160,70160
+10160,ORG/LG160-002,Olivia Walker,Olivia,Walker,Logistics_160,50161,70161
+10161,CORP/ON161-003,Contoso Holdings 161,,,Online_161,50162,70162
+10162,CORP/HC162-004,Priya Thomas,Priya,Thomas,Healthcare_162,50163,70163
+10163,CORP/MF163-005,Fabrikam Corp 163,,,Manufacturing_163,50164,70164
+10164,CORP/PH164-006,Olivia Jackson,Olivia,Jackson,Pharma_164,50165,70165
+10165,CORP/MF165-001,Isabella Johnson,Isabella,Johnson,Manufacturing_165,50166,70166
+10166,CORP/LG166-002,Noah Brown,Noah,Brown,Logistics_166,50167,70167
+10167,CORP/FN167-003,Priya Patel,Priya,Patel,Finance_167,50168,70168
+10168,CORP/MF168-004,Tailspin Ltd 168,,,Manufacturing_168,50169,70169
+10169,CORP/PH169-005,Emma Smith,Emma,Smith,Pharma_169,50170,70170
+10170,CORP/WH170-006,Jacob Brown,Jacob,Brown,Wholesale_170,50171,70171
+10171,CORP/CS171-001,Sophia Sharma,Sophia,Sharma,Consulting_171,50172,70172
+10172,CORP/ED172-002,Ethan Lee,Ethan,Lee,Education_172,50173,70173
+10173,CORP/LG173-003,Adventure Holdings 173,,,Logistics_173,50174,70174
+10174,CORP/ED174-004,Fabrikam LLC 174,,,Education_174,50175,70175
+10175,CORP/FN175-005,Jacob Brown,54321,Brown,Finance_175,50176,70176
+10176,CORP/PH176-006,Ethan Johnson,Ethan,Johnson,Pharma_176,50177,70177
+10177,CORP/FN177-001,Neha Garcia,Neha,Garcia,Finance_177,50178,70178
+10178,CORP/HC178-002,Ravi Brown,Ravi,Brown,Healthcare_178,50179,70179
+10179,CORP/LG179-003,Sarah Iyer,Sarah,Iyer,Logistics_179,50180,70180
+10180,CORP/RT180-004,Emma Garcia,Emma,Garcia,Retail_180,50181,70181
+10181,CORP/PH181-005,Ravi Singh,Ravi,Singh,Pharma_181,50182,70182
+10182,CORP/LG182-006,David White,David,White,Logistics_182,50183,70183
+10183,CORP/ED183-001,Jacob Brown,Jacob,Brown,Education_183,50184,70184
+10184,CORP/ED184-002,Mia Anderson,Mia,Anderson,Education_184,50185,70185
+10185,CORP/GN185-003,Contoso Corp 185,,,üüüüüüüüüü,50186,70186
+10186,CORP/WH186-004,Proseware Corp 186,,,Wholesale_186,50187,70187
+10187,CORP/WH187-005,Fabrikam LLC 187,,,Wholesale_187,50188,70188
+10188,CORP/CS188-006,Isabella Thomas,Isabella,Thomas,Consulting_188,50189,70189
+10189,CORP/FN189-001,Isabella Jackson,Isabella,Jackson,Finance_189,50190,70190
+10190,CORP/CS190-002,Sophia Smith,Sophia,Smith,Consulting_190,50191,70191
+10191,CORP/RT191-003,Arjun Lee,Arjun,Lee,Retail_191,50192,70192
+10192,CORP/ED192-004,Wide World Importers Ltd 192,,,Education_192,50193,70193
+10193,CORP/ON193-005,Kiran Jackson,Kiran,Jackson,Online_193,50194,70194
+10194,CORP/CS194-006,Litware Inc 194,,,Consulting_194,50195,70195
+10195,CORP/ON195-001,Litware LLC 195,,,Online_195,50196,70196
+10196,CORP/WH196-002,Mia White,Mia,White,Wholesale_196,50197,70197
+10197,CORP/HC197-003,Jacob Taylor,Jacob,Taylor,Healthcare_197,50198,70198
+10198,CORP/WH198-004,Noah Lee,Noah,Lee,Wholesale_198,50199,70199
+10199,CORP/MF199-005,Ananya Lee,Ananya,Lee,Manufacturing_199,50200,70200
+10200,CORP/PH200-006,Kiran Singh,Kiran,Singh,Pharma_200,50201,70201
+10201,UNI/JP001-001,田中商事株式会社,田中,太郎,Wholesale_201,50202,70202
+10202,UNI/KR002-002,삼성전자 주식회사,지수,김,Consulting_202,50203,70203
+10203,UNI/ZH003-003,北京科技有限公司,伟,张,Manufacturing_203,50204,70204
+10204,UNI/FR004-004,Société Générale Solutions,Ève,Dupont,Finance_204,50205,70205
+10205,UNI/DE005-005,Müller & Söhne GmbH,Björn,Müller,Online_205,50206,70206
+10206,UNI/ES006-006,Corporación Señalética Ñoño,Jesús,Pérez,Logistics_206,50207,70207
+10207,UNI/AR007-007,شركة الإمارات للتقنية,محمد,العلي,Retail_207,50208,70208
+10208,UNI/GK008-008,Ελληνική Εταιρεία ΑΕ,Νίκος,Παπαδόπουλος,Healthcare_208,50209,70209
+10209,UNI/RU009-009,ООО Технологии Будущего,Иван,Петров,Education_209,50210,70210
+10201,UNI/JP001-001,田中商事株式会社,田中,太郎,Wholesale_201,50202,70202
+10202,UNI/KR002-002,삼성전자 주식회사,지수,김,Consulting_202,50203,70203
+10203,UNI/ZH003-003,北京科技有限公司,伟,张,Manufacturing_203,50204,70204
+10204,UNI/AR004-004,شركة الإمارات للتقنية,محمد,العلي,Finance_204,50205,70205
+10205,UNI/GK005-005,Ελληνική Εταιρεία ΑΕ,Νίκος,Παπαδόπουλος,Online_205,50206,70206
+10206,UNI/RU006-006,ООО Технологии Будущего,Иван,Петров,Logistics_206,50207,70207

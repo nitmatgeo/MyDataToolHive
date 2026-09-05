@@ -1,0 +1,201 @@
+location_id,postal_code,province,state,city,address1,address2,address3,address4,country,county
+50002,13278,Oregon,OR,Portland,4507 Maple St!,Suite 143,Block 2,,US,Multnomah
+50003,3184ab,Tamil Nadu,TN,Chennai,8929 Park Ave?,Suite 460,,Near City Mall,IN,Chennai
+50004,E5P 9L0,Ontario,ON,Toronto,7528 Lakeview Dr,Apt 997,Block 2,Near Tech Hub,CA,Toronto
+50005,L7P 2P5,Ontario,ON2,Toronto,3433 Church St,Floor 719,,,CA,Toronto
+50006,17331,New York,NY,New York,3753 Main St,Floor 411,,Near Harbor,US,New York
+50007,675159,Tamil Nadu,TN,Chennai,4305 High St,,Building N,,IN,Chennai
+50008,30033,Oregon,OR,12345,2622 Church St,Unit 611,Building C,Near Harbor,US,Multnomah
+50009,48469,Oregon,OR,Portland,7124 Pine Rd,Unit 4,Building X,,US,Multnomah
+50010,926450,Tamil Nadu,TN,Chennai,8690 Main St?,,,Near Central Park,IN,Chennai
+50011,192583,Tamil Nadu,TN,Coimbatore,1404 High St,Unit 836,,Near City Mall,IN,Coimbatore
+50012,901953,Tamil Nadu,TN,Chennai,3296 High St,Floor 409,Building V,Near Railway Station,IN,Chennai
+50013,351293,Tamil Nadu,TN,Chennai,9642 Maple St,Apt 73,,,IN,Chennai
+50014,JF7W@9Q7,England,ENG,Manchester,3982 2nd St,Unit 195,Block 2,Near Railway Station,GB,Greater Manchester
+50015,24322,New York,NY,New York,4074 Maple St,Suite 550,Building O,Near City Mall,US,New York
+50016,22224,Washington,WA,Seattle,3873 Pine Rd,Unit 498,Building P,,US,King
+50017,34890,California,CA,San Francisco,4862 Maple St,Apt 594,,,US,San Francisco
+50018,18981,California,CA,San Jose,9750 Oak Ave,Suite 414,,,US,Santa Clara
+50019,44814,Texas,TX,Dallas,6485 Pine Rd,Floor 469,,,US,Dallas
+50020,47353,Florida,FL,Miämi,2585 2nd St,,Block 5,,US,Miami-Dade
+50021,272999,Tamil Nadu,TN,Chennai,4463 Cedar Ln,,Building G,Near City Mall,IN,Chennai
+50022,15778,Illinois,IL,Chicago,59 Sunset Blvd,Suite 653,Block 3,Near Railway Station,US,Cook
+50023,G0M 5B5,British Columbia,BC,Vancouver,3442 Church St,Suite 683,Block 6,,CA,Metro Vancouver
+50024,K4H 1R0,British Columbia,BC,Vancouver,7712 Maple St,Suite 837,Building O,,CA,Metro Vancouver
+50025,94080,Florida,FL,Miami,8347 Park Ave!,,,,US,Miami-Dade
+50026,X1R 9J4,British Columbia,BC,Vancouver,728 High St,Unit 2,Block 9,Near City Mall,CA,Metro Vancouver
+50027,97410,Massachusetts,MA,Boston,6692 Sunset Blvd,Unit 714,,Near City Mall,US,Suffolk
+50028,47606,Massachusetts,MA,Boston,3444 Park Ave,,Building T,Near Railway Station,US,Suffolk
+50029,806102,Karnataka,KA,Bengaluru,5492 Oak Ave,Suite 689,,,IN,Bengaluru Urban
+50030,313881,Tamil Nadu,TN99,Coimbatore,6292 2nd St,Unit 250,Block 11,,IN,Coimbatore
+50031,371304,Tamil Nadu,TN,Chennai,1989 2nd St,Suite 821,Block 11,Near Harbor,IN,Chennai
+50032,72216,California,CA,San Jose,7374 Cedar Ln,Suite 861,Block 5,,US,Santa Clara
+50033,28136,Washington,WA,Bellevue,2472 Maple St,Unit 711,,Near Central Park,US,King
+50034,839309,Tamil Nadu,TN,Coimbatore,321 Hillcrest Rd,Unit 489,Building A,Near Railway Station,IN,Coimbatore
+50035,67125,Illinois,IL,Chicago,7957 Main St,Unit 345,Building V,Near City Mall,US,Cook
+50036,70515,California,CA,San Francisco,2978 Main St,Floor 389,Building K,Near Tech Hub,US,San Francisco
+50037,164616,Tamil Nadu,TN,Chennai,5734 Maple St,Apt 800,,,IN,Chennai
+50038,83920,Oregon,OR,Portland,3572 2nd St,Floor 786,Block 3,,US,Multnomah
+50039,J1K 1M9,Ontario,ON,Toronto,1984 Hillcrest Rd,Apt 356,Block 7,,CA,Toronto
+50040,GS4É 8R4,England,ENG,London,8818 2nd St,Unit 447,Building X,,GB,Greater London
+50041,749980,Tamil Nadu,TN,Coimbatore,6210 Sunset Blvd,Apt 507,Building K,Near City Mall,IN,Coimbatore
+50042,77715,Washington,WA,Seattle,3131 Oak Ave,Suite 738,Block 8,Near City Mall,US,King
+50043,50135,Texas,TX,Dallas,9529 Sunset Blvd,Unit 567,Building Q,Near Harbor,US,Dallas
+50044,25670,New York,NY,New York,8780 High St,Suite 197,Building G,Near Tech Hub,US,New York
+50045,242732,Tamil Nadu,TN,Chennai,4495 Main St,Apt 567,,,IN,Chennai
+50046,16734,California,CA,San Jose,4137 2nd St,Apt 842,Building C,,US,Santa Clara
+50047,735085,Telangana,TG,Hyderabad,3698 Lakeview Dr,Unit 462,Block 5,Near Railway Station,IN,Hyderabad
+50048,44687,Texas,TX,Austin,1331 Pine Rd,Suite 178,,Near Central Park,US,Travis
+50049,CJ3M 9R3,England,ENG,London,6966 Oak Ave,,,,GB,Greater London
+50050,PR7M 8P7,England,ENG,testtesttest,7173 Oak Ave,,Block 7,Near Tech Hub,GB,Greater London
+50051,85529,Illinois,IL,Chicago,660 Pine Rd,Unit 532,Building U,Near City Mall,US,Cook
+50052,31079,Oregon,OR,Portland,5404 Park Ave,Unit 296,Block 7,Near Central Park,US,Multnomah
+50053,TB9H 8J9,England,ENG,London,8168 Church St,Unit 779,Building B,,GB,Greater London
+50054,30758,Texas,TX,Dallas,5092 Lakeview Dr,Apt 566,,Near Central Park,US,Dallas
+50055,69871,Texas,TX,Dallas,9032 Pine Rd,Unit 196,Block 9,,US,Dallas
+50056,718094,Tamil Nadu,TN,Coimbatore,8023 Pine Rd,Unit 552,Building P,Near Harbor,IN,Coimbatore
+50057,B5V@6R2,British Columbia,BC,Vancouver,8116 Main St,Suite 515,,,CA,Metro Vancouver
+50058,NP1T 6R1,England,ENG,Manchester,5384 Church St,,Block 6,,GB,Greater Manchester
+50059,68153,Oregon,OR,Portland,2726 High St,Floor 926,Building A,Near Central Park,US,Multnomah
+50060,32946,California,CA,San Jose,1294 Hillcrest Rd,Unit 635,Building V,unknown?location,US,Santa Clara
+50061,19681,California,CA,San Jose,7238 Sunset Blvd,,Building J,Near Tech Hub,US,Santa Clara
+50062,420245,Tamil Nadu,TN,Coimbatore,4838 Main St,Unit 282,Block 10,Near Central Park,IN,Coimbatore
+50063,91381,Texas,TX,Austin,4107 Church St,Suite 644,Block 11,Near Central Park,US,Travis
+50064,36318,California,CA,San Jose,2166 Lakeview Dr,Floor 544,,Near Tech Hub,US,Santa Clara
+50065,Y5C 6A4,Ontario,ON,Toronto,8792 Oak Ave,Unit 378,Block 12,Near Tech Hub,CA,Toronto
+50066,342121,Telangana,TG,Hyderabad,1036 Church St,Unit 932,Block 5,,IN,Hyderabad
+50067,80457,Texas,TX,Dallas,2223 Park Ave,Unit 380,Block 12,Near Harbor,US,Dallas
+50068,58566,Washington,WA,Redmond,3560 2nd St,Unit 974,,Near Tech Hub,US,King
+50069,132395,Telangana,TG,Hyderabad,829 Sunset Blvd,Suite 129,,,IN,Hyderabad
+50070,27038!,California,CA,San Francisco,8851 Cedar Ln,Suite 113,,Near Central Park,US,San Francisco
+50071,X1C 7T5,British Columbia,BC,Vancouver,8409 Hillcrest Rd,Apt 463,Block 4,Near Central Park,CA,Metro Vancouver
+50072,UD2B 5Q2,England,ENG,Manchester,1077 Pine Rd,Floor 640,Block 10,Near Tech Hub,GB,Greater Manchester
+50073,95814,Oregon,OR,Portland,9034 High St,Suite 441,Building O,Near Tech Hub,US,Multnomah
+50074,72163,California,CA,San Francisco,1100 Oak Ave,Apt 96,Block 2,,US,San Francisco
+50075,97207,Florida,FL,Miami,6930 High St,Apt 992,Building J,,US,Miami-Dade
+50076,46512,Oregon,OR,Portland,9407 Maple St,Unit 866,Block 10,,US,Multnomah
+50077,56009,New York,NY,New York,101 Pine Rd,Suite 580,,,US,New York
+50078,50846,Florida,FL,Miami,5315 Hillcrest Rd,,,,US,Miami-Dade
+50079,38255,Illinois,IL,Chicago,8395 Oak Ave,Floor 441,Block 5,Near Harbor,US,Cook
+50080,49507,Texas,99999,Austin,3461 Pine Rd,Floor 297,,Near Railway Station,US,Travis
+50081,A7C 5S9,British Columbia,BC,Vancouver,6627 High St,Unit 297,,,CA,Metro Vancouver
+50082,529903,Tamil Nadu,TN,Coimbatore,8585 Oak Ave,Unit 892,Building J,Near City Mall,IN,Coimbatore
+50083,56019,Florida,FL,Miami,2420 Maple St,Apt 150,,,US,Miami-Dade
+50084,784226,Tamil Nadu,TN,Coimbatore,5296 Church St,Floor 155,Building O,Near Railway Station,IN,Coimbatore
+50085,UB4A 5U4,England,ENG,London,1258 Church St,Apt 630,Building T,,GB,Greater London
+50086,69050,Washington,WA,Redmond,1696 Sunset Blvd,Apt 517,,Near City Mall,US,King
+50087,98984,New York,NY,New York,9796 Main St,Floor 68,Block 2,Near Railway Station,US,New York
+50088,50662,Florida,FL,Miami,6422 Pine Rd,,Building W,Near Harbor,US,Miami-Dade
+50089,489405,Karnataka,KA,Bengaluru,299 Sunset Blvd,Floor 185,Building G,,IN,Bengaluru Urban
+50090,985687,Tamil Nadu,TN,Chennai,123456789,Floor 898,,Near Harbor,IN,Chennai
+50091,P3T 9M7,British Columbia,BC,Vancouver,3834 Lakeview Dr,Suite 317,,Near Tech Hub,CA,Metro Vancouver
+50092,16839,Illinois,IL,Chicago,7874 Sunset Blvd,,Block 12,Near Central Park,US,Cook
+50093,RA8P 0L8,England,ENG,London,6127 Maple St,Unit 84,,,GB,Greater London
+50094,GU1R 9A1,England,ENG,Manchester,312 Cedar Ln,Suite 856,Block 9,Near Harbor,GB,Greater Manchester
+50095,T1E 7Y0,British Columbia,BC,Vancouver,8444 Hillcrest Rd,Suite 736,Building E,Near Central Park,CA,Metro Vancouver
+50096,934614,Karnataka,KA,Bengaluru,8317 Lakeview Dr,Apt 400,Block 1,Near Railway Station,IN,Bengaluru Urban
+50097,86271,Oregon,OR,Portland,5448 Pine Rd,Apt 361,Block 6,Near City Mall,US,Multnomah
+50098,48462,Washington,WA,Redmond,3303 Main St,Suite 908,Building B,Near Harbor,US,King
+50099,56789,Massachusetts,MA,Boston,784 Church St,Floor 280,Building D,Near Railway Station,US,Suffolk
+50100,389677,Karnataka,KA,TESTTESTTEST,1354 High St,Unit 81,,Near Harbor,IN,Bengaluru Urban
+50101,862525,Telangana,TG,Hyderabad,6982 Pine Rd,Unit 360,Block 1,Near Tech Hub,IN,Hyderabad
+50102,14081,California,CA,San Jose,2340 Hillcrest Rd,Unit 36,,Near Tech Hub,US,Santa Clara
+50103,68188,Florida,FL,Miami,1260 Hillcrest Rd,Suite 543,Building L,,US,Miami-Dade
+50104,68493,Illinois,IL,Chicago,3516 Hillcrest Rd,Floor 711,,,US,Cook
+50105,49315,Massachusetts,MA,Boston,2581 High St,Suite 813,,,US,Suffolk
+50106,GD7B--4L7,England,ENG,London,8613 Park Ave,Unit 844,,,GB,Greater London
+50107,X0E 8G4,British Columbia,BC,Vancouver,2698 Pine Rd,Floor 958,Building W,Near Harbor,CA,Metro Vancouver
+50108,669393,Telangana,TG,Hyderabad,1531 Lakeview Dr,Suite 607,,Near Harbor,IN,Hyderabad
+50109,387512,Tamil Nadu,TN,Coimbatore,3454 Hillcrest Rd,Unit 633,Building U,Near Harbor,IN,Coimbatore
+50110,CB7E 7L7,England,ENG,London,7610 Maple St,Floor 622,Block 6,Near Tech Hub,GB,Greater London
+50111,EL1R 3D1,England,ENG,London,830 Cedar Ln,Unit 885,,Near City Mall,GB,Greater London
+50112,PU8A 1L8,England,ENG,Manchester,7492 Maple St,Suite 598,,Near Tech Hub,GB,Greater Manchester
+50113,G4P 6P0,British Columbia,BC,Vancouver,6564 Main St,,Building R,Near Harbor,CA,Metro Vancouver
+50114,22672,California,CA,San Francisco,6454 Sunset Blvd,Floor 572,,Near Harbor,US,San Francisco
+50115,89463,California,CA,San Francisco,8447 Pine Rd,Floor 954,,Near Railway Station,US,San Francisco
+50116,AQ9N 1L9,England,ENG,Manchester,5041 High St,Apt 612,Block 5,,GB,Greater Manchester
+50117,14138,Texas,TX,Dallas,9381 High St,Apt 196,Building A,,US,Dallas
+50118,77984,California,CA,San Francisco,3398 Lakeview Dr,Floor 679,Building P,,US,San Francisco
+50119,617700,Telangana,TG,Hyderabad,3151 Maple St,Floor 572,Building J,,IN,Hyderabad
+50120,47721,Illinois,IL,Chicago,1997 Hillcrest Rd,,Building M,Near City Mall,US,Cook
+50121,80592,Texas,TX,Austin,4443 Lakeview Dr,Floor 141,Block 10,,US,Travis
+50122,EF2A 8W2,England,ENG,Manchester,6667 Church St,Unit 489,Building U,Near Tech Hub,GB,Greater Manchester
+50123,14763,California,CA,San Jose,6505 2nd St,Suite 960,,Near Central Park,US,Santa Clara
+50124,GW1R 4G1,England,ENG,Manchester,5418 Pine Rd,Unit 664,,Near Central Park,GB,Greater Manchester
+50125,453857,Karnataka,KA,Bengaluru,1422 Park Ave,Apt 190,Building E,,IN,Bengaluru Urban
+50126,867998,Tamil Nadu,TN,Coimbatore,9387 Main St,Floor 670,,,IN,Coimbatore
+50127,93717,Oregon,OR,Portland,4834 Sunset Blvd,,,,US,Multnomah
+50128,99173,Texas,TX,Dallas,9762 Oak Ave,,Block 9,,US,Dallas
+50129,53007,California,CA,San Jose,8526 2nd St,Apt 697,Block 12,,US,Santa Clara
+50130,170542,Tamil Nadu,TN,Coimbatore,9156 2nd St,Floor 741,Building A,,IN,Coimbatore
+50131,19046,Washington,WA,Redmond,7735 Main St,Floor 419,Block 3,Near Railway Station,US,King
+50132,-----,California,CA,San Francisco,5698 Oak Ave,Suite 551,,,US,San Francisco
+50133,70375,Texas,TX,Dallas,5672 Pine Rd,Floor 194,,,US,Dallas
+50134,15798,Texas,TX,Dallas,6591 2nd St,Suite 553,,Near Harbor,US,Dallas
+50135,341781,Karnataka,KA,Bengaluru,6776 Cedar Ln,Floor 63,Block 10,Near City Mall,IN,Bengaluru Urban
+50136,S2M 6H8,British Columbia,BC,Vancouver,7759 Maple St,Suite 308,Building W,Near Central Park,CA,Metro Vancouver
+50137,68954,Washington,WA,Bellevue,6080 Oak Ave,,,Near Tech Hub,US,King
+50138,JP3M 0G3,England,ENG,Manchester,1923 High St,Unit 937,Block 12,Near City Mall,GB,Greater Manchester
+50139,50425,Florida,FL,Miami,4286 Sunset Blvd,,,Near Railway Station,US,Miami-Dade
+50140,44180,Washington,WA,Seattle,9066 Hillcrest Rd,,Building X,,US,King
+50141,74044,Illinois,IL,Chicago,8038 2nd St,Suite 751,,Near City Mall,US,Cook
+50142,64053,Washington,WA,Seattle,2253 Church St,Suite 70,,Near City Mall,US,King
+50143,541320,Tamil Nadu,TN,Chennai,195 Main St,,Block 5,,IN,Chennai
+50144,41584,California,CA,San Francisco,3145 Hillcrest Rd,,Building I,,US,San Francisco
+50145,95686,Washington,WA,Bellevue,520 Oak Ave,Unit 389,Building M,,US,King
+50146,40115,Washington,WA,Redmond,3464 High St,,,Near Central Park,US,King
+50147,C4H 9K9,Ontario,ON,Toronto,6376 Church St,,Block 7,,CA,Toronto
+50148,916361,Telangana,TG,Hyderabad,9759 Park Ave,Floor 31,Building U,,IN,Hyderabad
+50149,419728,Telangana,TG,Hyderabad,4038 High St,Apt 85,Building I,Near City Mall,IN,Hyderabad
+50150,45358,Florida,FL,Miami,1675 Pine Rd,Apt 192,Block 8,Near Harbor,US,Miami-Dade
+50151,A4S 6C8,Ontario,ON,Toronto,3978 Hillcrest Rd,,Building F,,CA,Toronto
+50152,M7C 5L3,British Columbia,BC,Vancouver,8124 Hillcrest Rd,,,Near City Mall,CA,Metro Vancouver
+50153,G4N 9J7,British Columbia,BC,Vancouver,5148 Pine Rd,Unit 992,Block 5,,CA,Metro Vancouver
+50154,99353,California,CA,San Jose,9013 Main St,Unit 966,Building W,,US,Santa Clara
+50155,R1T 9V9,British Columbia,BC,Vancouver,6567 Lakeview Dr,,Block 7,Near Central Park,CA,Metro Vancouver
+50156,94803,California,CA,San Jose,726 Hillcrest Rd,Unit 991,Building Y,,US,Santa Clara
+50157,GQ4A 7B4,England,ENG,London,6816 Oak Ave,Apt 852,Building X,Near Tech Hub,GB,Greater London
+50158,UP1B 4A1,England,ENG,London,371 Sunset Blvd,Apt 694,Block 3,,GB,Greater London
+50159,H2S 6A9,Ontario,ON,Toronto,3233 2nd St,,,,CA,Toronto
+50160,EL5U 7P5,England,ENG,London,9781 Park Ave,,,Near Tech Hub,GB,Greater London
+50161,no data,New York,NY,New York,3909 Cedar Ln,Apt 188,,Near Harbor,US,New York
+50162,82733,California,CA,San Jose,2734 2nd St,Floor 144,Building F,,US,Santa Clara
+50163,TU2P 7N2,England,ENG,Manchester,1355 Hillcrest Rd,Apt 815,Building Y,Near Central Park,GB,Greater Manchester
+50164,85066,Oregon,OR,Portland,1872 Cedar Ln,,,,US,Multnomah
+50165,67549,Washington,WA,Bellevue,1924 Maple St,Suite 831,Block 10,Near Tech Hub,US,King
+50166,88231,Illinois,IL,Chicago,8828 Pine Rd,Floor 721,Block 5,,US,Cook
+50167,52217,California,CA,San Francisco,4056 Church St,Unit 502,Block 10,Near Tech Hub,US,San Francisco
+50168,QA7Y 1S7,England,ENG,Manchester,5870 Oak Ave,,Building M,Near City Mall,GB,Greater Manchester
+50169,QB7A 1R7,England,ENG,Manchester,267 Oak Ave,Suite 452,Building O,,GB,Greater Manchester
+50170,20803,Illinois,IL,Chicago,6093 Church St,Suite 54,Building M,Near City Mall,US,Cook
+50171,aaaaa,Karnataka,KA,Bengaluru,7292 Main St,Apt 713,Building K,Near City Mall,IN,Bengaluru Urban
+50172,111111,Florida,FL,Miami,2247 Park Ave,Suite 657,,,US,Miami-Dade
+50173,T3C 1G1,British Columbia,BC,Vancouver,9660 High St,Unit 360,,Near City Mall,CA,Metro Vancouver
+50174,36.928,Massachusetts,MA,Boston,8483 Hillcrest Rd,,Building G,,US,Suffolk
+50175,12 26 54,Karnataka,KA,Bengaluru,5917 Sunset Blvd,Suite 397,Building S,,IN,Bengaluru Urban
+50176,38:E277,Illinois,IL,Chicago,653 Main St,Unit 519,Block 11,Near Harbor,US,Cook
+50177,77017,Washington,WA,Bellevue,3330 Pine Rd,,Block 7,Near Central Park,US,King
+50178,748408,Telangana,TG,Hyderabad,902 Cedar Ln,Suite 123,,,IN,Hyderabad
+50179,26637,Florida,FL,Miami,4404 High St,Apt 790,Building A,,US,Miami-Dade
+50180,HQ1E 4T1,England,ENG,Manchester,9403 Church St,Apt 234,,,GB,Greater Manchester
+50181,82465,Washington,WA,Redmond,6871 Maple St,Floor 255,Building N,,US,King
+50182,C7M 4N1,Ontario,ON,Toronto,9062 2nd St,Apt 378,Block 5,,CA,Toronto
+50183,40539,Washington,WA,Seattle,8873 Sunset Blvd,Apt 974,Block 1,Near Railway Station,US,King
+50184,15754,Washington,WA,Bellevue,3793 Lakeview Dr,Unit 718,Block 8,,US,King
+50185,48230,Texas,TX,Dallas,4277 Sunset Blvd,Unit 718,Building X,Near Railway Station,US,Dallas
+50186,UP5P 1P5,England,ENG,London,3402 2nd St,Floor 475,,Near City Mall,GB,Greater London
+50187,56627,Texas,TX,Dallas,6493 Lakeview Dr,Apt 694,,Near Central Park,US,Dallas
+50188,18083,Washington,WA,Seattle,3642 Pine Rd,Suite 844,Block 6,Near Central Park,US,King
+50189,veryLONG PINCODE,Washington,WA,Bellevue,2008 Main St,Unit 52,Building F,Near Railway Station,US,King
+50190,GB3T 9Q3,England,ENG,London,4836 2nd St,Unit 904,,Near Central Park,GB,Greater London
+50191,smca3457,Tamil Nadu,TN,Chennai,320 Park Ave,Floor 492,Building R,Near Harbor,IN,Chennai
+50192,17679,Illinois,IL,Chicago,7729 Lakeview Dr,Floor 786,,,US,Cook
+50193,3Ñ3081,California,CA,San Jose,3876 Hillcrest Rd,Floor 826,Building X,,US,Santa Clara
+50194,74282,California,CA,San Jose,622 Oak Ave,Apt 239,,Near Harbor,US,Santa Clara
+50195,12872,Washington,WA,Redmond,2421 Hillcrest Rd,Suite 793,Building D,Near Central Park,US,King
+50196,V5H 8P3,British Columbia,BC,Vancouver,9650 Pine Rd,Unit 315,Building X,,CA,Metro Vancouver
+50197,GP5W 1G5,England,ENG,Manchester,5235 Pine Rd,Apt 842,Block 11,Near Tech Hub,GB,Greater Manchester
+50198,10167,Oregon,OR,Portland,789 Park Ave,Unit 751,Building N,Near Railway Station,US,Multnomah
+50199,4ي8654,Washington,WA,Redmond,329 Sunset Blvd,Floor 975,Building D,Near City Mall,US,King
+50200,66534,Washington,WA,Seattle,2704 Hillcrest Rd,Unit 161,Building B,,US,King
+50201,61498,Washington,WA,Redmond,9368 Lakeview Dr,Unit 158,,,US,King
