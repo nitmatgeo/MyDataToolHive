@@ -1,0 +1,630 @@
+from __future__ import annotations
+
+import os
+import shutil
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from excel_ingest.mapping.adapters.base import LLMAdapter
+from excel_ingest.mapping.confidence import CanonicalMapping, MappingStatus
+from excel_ingest.mapping.engine import map_to_canonical
+from excel_ingest.metadata import MetadataExtractionResult, extract_metadata
+from excel_ingest.structure import (
+    FileProcessingConfig, FileStatus, FileStructureMetadata, analyze_excel_structure,
+)
+from excel_ingest.validation import FileValidationResult, ValidationStatus, validate_excel_file
+
+# LoadResult imported lazily inside load() / combine() to keep pyspark optional
+# for callers who only use stages 1–4 without loading data into DataFrames.
+
+
+@dataclass
+class IngestResult:
+    """Full pipeline result returned by ExcelIngestFramework.ingest()."""
+
+    file_path: str
+    validation: FileValidationResult
+    structure: Optional[FileStructureMetadata]
+    metadata: Optional[MetadataExtractionResult]
+    mappings: List[CanonicalMapping]
+    success: bool
+    errors: List[str] = field(default_factory=list)
+
+    def mapping_records(self) -> List[Dict[str, Any]]:
+        return [m.to_dict() for m in self.mappings]
+
+    def summary_record(self) -> Dict[str, Any]:
+        """Aggregate mapping counts for this file — one dict, ready for display() or logging.
+
+        Columns map cleanly to the four MappingStatus values so callers never need
+        to import or reference MappingStatus directly::
+
+            display(spark.createDataFrame([result.summary_record()]))
+        """
+        file_id = self.metadata.file_metadata.file_id if self.metadata else os.path.basename(self.file_path)
+        counts: Dict[str, int] = {s.value: 0 for s in MappingStatus}
+        for m in self.mappings:
+            counts[m.mapping_status.value] += 1
+        return {
+            "file_id":        file_id,
+            "success":        self.success,
+            "total_cols":     len(self.mappings),
+            "auto_approved":  counts[MappingStatus.AUTO_APPROVED.value],
+            "needs_review":   counts[MappingStatus.NEEDS_REVIEW.value],
+            "requires_human": counts[MappingStatus.REQUIRES_HUMAN.value],
+            "unmapped":       counts[MappingStatus.UNMAPPED.value],
+        }
+
+    def metadata_records(self) -> List[Dict[str, Any]]:
+        return self.metadata.to_delta_records() if self.metadata else []
+
+    def file_record(self) -> Optional[Dict[str, Any]]:
+        return self.metadata.file_metadata.to_dict() if self.metadata else None
+
+
+class ExcelIngestFramework:
+    """Databricks-native Excel ingestion framework.
+
+    Orchestrates a 4-stage pipeline:
+      1. validate()         — file existence, format, password, sheets
+      2. detect_structure() — merged cells, multi-row headers, blank/hidden columns
+      3. extract_metadata() — hierarchical headers, SHA-256 signature, section IDs
+      4. map_to_canonical() — hybrid rule + optional LLM confidence mapping
+
+    The framework works on any Python 3.9+ environment with openpyxl.
+    Databricks-specific features (Volume/DBFS path detection, Foundation Models)
+    are enabled automatically when running inside a Databricks cluster.
+
+    Args:
+        spark:   Optional SparkSession — not used by the framework itself but
+                 available to callers who want to write Delta tables from results.
+        adapter: Optional LLMAdapter instance (DatabricksAdapter / OpenAIAdapter /
+                 AnthropicAdapter). If None, the mapping stage uses rules only.
+
+    Examples::
+
+        from excel_ingest import ExcelIngestFramework
+
+        framework = ExcelIngestFramework(spark=spark)
+        result = framework.ingest(
+            file_path="/Volumes/catalog/schema/vol/data.xlsx",
+            canonical_dict={"order_id": ["order no", "transaction id"], ...},
+        )
+
+        # With a Databricks LLM adapter
+        from excel_ingest.mapping.adapters.databricks import DatabricksAdapter
+        adapter = DatabricksAdapter(model="databricks-llama-3-70b-instruct")
+        framework = ExcelIngestFramework(spark=spark, adapter=adapter)
+    """
+
+    def __init__(
+        self,
+        spark=None,
+        adapter: Optional[LLMAdapter] = None,
+    ) -> None:
+        self.spark = spark
+        self.adapter = adapter
+
+    # ------------------------------------------------------------------
+    # Stage 1
+    # ------------------------------------------------------------------
+
+    def validate(
+        self,
+        file_path: str,
+        password: Optional[str] = None,
+    ) -> FileValidationResult:
+        """Validate file existence, format, password protection, and sheet list."""
+        return validate_excel_file(file_path, password)
+
+    # ------------------------------------------------------------------
+    # Stage 2
+    # ------------------------------------------------------------------
+
+    def detect_structure(
+        self,
+        file_path: str,
+        config: Optional[FileProcessingConfig] = None,
+        password: Optional[str] = None,
+    ) -> FileStructureMetadata:
+        """Detect header rows, merged cells, blank/hidden columns, and data boundaries."""
+        return analyze_excel_structure(file_path, config, password)
+
+    # ------------------------------------------------------------------
+    # Stage 3
+    # ------------------------------------------------------------------
+
+    def extract_metadata(
+        self,
+        file_path: str,
+        structure: Optional[FileStructureMetadata] = None,
+        file_id: Optional[str] = None,
+        password: Optional[str] = None,
+        config: Optional[FileProcessingConfig] = None,
+    ) -> MetadataExtractionResult:
+        """Extract hierarchical column metadata and generate a header signature.
+
+        If structure is not supplied, detect_structure() is called automatically.
+        """
+        if structure is None:
+            structure = self.detect_structure(file_path, config, password)
+        return extract_metadata(file_path, structure, file_id)
+
+    # ------------------------------------------------------------------
+    # Stage 4
+    # ------------------------------------------------------------------
+
+    def map_to_canonical(
+        self,
+        metadata: MetadataExtractionResult,
+        canonical_dict: Dict[str, List[str]],
+        country_code: Optional[str] = None,
+        prior_mappings: Optional[Dict[str, str]] = None,
+        adapter: Optional[LLMAdapter] = None,
+        skip_blank_columns: bool = True,
+    ) -> List[CanonicalMapping]:
+        """Map column headers to canonical field names.
+
+        Args:
+            metadata:        Output of extract_metadata().
+            canonical_dict:  {canonical_field: [alias1, alias2, ...]}.
+                             Fully caller-supplied — no hardcoded domain.
+            country_code:    ISO-2 country hint (e.g. "UK", "US", "DE").
+            prior_mappings:  {hierarchical_header: canonical_field} from previous
+                             runs — boosts confidence for already-seen headers.
+            adapter:         Override the framework-level adapter for this call.
+            skip_blank_columns: Skip blank columns (default True).
+        """
+        effective_adapter = adapter if adapter is not None else self.adapter
+        return map_to_canonical(
+            metadata_result=metadata,
+            canonical_dict=canonical_dict,
+            adapter=effective_adapter,
+            country_code=country_code,
+            prior_mappings=prior_mappings,
+            skip_blank_columns=skip_blank_columns,
+        )
+
+    # ------------------------------------------------------------------
+    # Full pipeline
+    # ------------------------------------------------------------------
+
+    def ingest(
+        self,
+        file_path: str,
+        canonical_dict: Dict[str, List[str]],
+        config: Optional[FileProcessingConfig] = None,
+        password: Optional[str] = None,
+        file_id: Optional[str] = None,
+        country_code: Optional[str] = None,
+        prior_mappings: Optional[Dict[str, str]] = None,
+        adapter: Optional[LLMAdapter] = None,
+        skip_blank_columns: bool = True,
+    ) -> IngestResult:
+        """Run all 4 stages in sequence and return a consolidated IngestResult.
+
+        Stops early if validation or structure detection fails.
+        """
+        errors: List[str] = []
+
+        # Stage 1
+        validation = self.validate(file_path, password)
+        if validation.status == ValidationStatus.FAILED:
+            return IngestResult(
+                file_path=file_path,
+                validation=validation,
+                structure=None,
+                metadata=None,
+                mappings=[],
+                success=False,
+                errors=validation.errors,
+            )
+
+        # Stage 2
+        structure = self.detect_structure(file_path, config, password)
+        if structure.status in (FileStatus.EMPTY_FILE, FileStatus.INVALID_STRUCTURE,
+                                FileStatus.SHEET_NOT_SPECIFIED):
+            errors.append(f"Structure detection failed: {structure.status.value}")
+            return IngestResult(
+                file_path=file_path,
+                validation=validation,
+                structure=structure,
+                metadata=None,
+                mappings=[],
+                success=False,
+                errors=errors,
+            )
+
+        # Stage 3
+        metadata = extract_metadata(file_path, structure, file_id)
+
+        # Stage 4
+        mappings = self.map_to_canonical(
+            metadata=metadata,
+            canonical_dict=canonical_dict,
+            country_code=country_code,
+            prior_mappings=prior_mappings,
+            adapter=adapter,
+            skip_blank_columns=skip_blank_columns,
+        )
+
+        return IngestResult(
+            file_path=file_path,
+            validation=validation,
+            structure=structure,
+            metadata=metadata,
+            mappings=mappings,
+            success=True,
+            errors=errors,
+        )
+
+    # ------------------------------------------------------------------
+    # Stage 5 — Load data
+    # ------------------------------------------------------------------
+
+    def load(
+        self,
+        file_path: str,
+        structure: FileStructureMetadata,
+        metadata: MetadataExtractionResult,
+        password: Optional[str] = None,
+        config: Optional[FileProcessingConfig] = None,
+        skip_hidden_columns: bool = False,
+    ) -> "LoadResult":
+        """Load data rows from an Excel sheet as a Spark DataFrame.
+
+        Returns a LoadResult with result.df — a Spark DataFrame containing all
+        loadable columns named using db_canonical_bronze_column_name (STRING),
+        plus three auto-columns appended to every row:
+          - source_file       : filename (basename only)
+          - source_sheet      : sheet name
+          - insert_timestamp  : datetime when load() was called
+
+        All values land as STRING — cast to correct types in the silver layer.
+
+        Args:
+            file_path:            Path to the Excel file (Volume, DBFS, or local).
+            structure:            Output of detect_structure() for this file + sheet.
+            metadata:             Output of extract_metadata() for this file + sheet.
+            password:             Password for AES-encrypted files.
+            config:               Optional FileProcessingConfig — only needed when
+                                  ignore_rows / ignore_row_ranges overrides are
+                                  required at load time. Build from a Delta override
+                                  table using FileProcessingConfig.from_override(row).
+            skip_hidden_columns:  Exclude hidden columns from result.df (default False).
+
+        Raises:
+            RuntimeError: If no SparkSession was passed to the framework constructor.
+
+        Example::
+
+            structure = framework.detect_structure(path, config=config)
+            meta      = framework.extract_metadata(path, structure, file_id="S01")
+            result    = framework.load(path, structure, meta)
+            result.df.write.mode("append").saveAsTable("bronze.sales")
+        """
+        if self.spark is None:
+            raise RuntimeError(
+                "framework.load() requires a SparkSession. "
+                "Pass spark= when constructing ExcelIngestFramework."
+            )
+        from excel_ingest.loader import load_excel_data
+        return load_excel_data(
+            file_path=file_path,
+            structure=structure,
+            metadata=metadata,
+            spark=self.spark,
+            password=password,
+            config=config,
+            skip_hidden_columns=skip_hidden_columns,
+        )
+
+    def combine(self, results: List["LoadResult"]) -> Any:
+        """Union multiple LoadResult DataFrames into one, NULL-filling missing columns.
+
+        Computes the full bronze column union across all results. Any column
+        present in some files but not others is added as NULL STRING. Auto-columns
+        (source_file, source_sheet, insert_timestamp) are always at the end.
+
+        Use this when ingesting multiple files with different column sets into one
+        consolidated Delta table. For files with completely different schemas, load
+        each into its own table instead — combine() makes no compatibility checks.
+
+        Args:
+            results: List of LoadResult from framework.load(). Row order is preserved
+                     within each result; results are stacked in list order.
+
+        Returns:
+            pyspark.sql.DataFrame — columns sorted alphabetically then auto-columns.
+
+        Raises:
+            RuntimeError: If no SparkSession was passed to the framework constructor.
+            ValueError:   If results is empty.
+
+        Example::
+
+            all_results = []
+            for cfg in FILE_CONFIGS:
+                result = framework.load(path, structure, meta)
+                all_results.append(result)
+
+            combined_df = framework.combine(all_results)
+            combined_df.write.mode("append").saveAsTable("bronze.all_regional_sales")
+        """
+        if self.spark is None:
+            raise RuntimeError(
+                "framework.combine() requires a SparkSession. "
+                "Pass spark= when constructing ExcelIngestFramework."
+            )
+        from excel_ingest.loader import combine_results
+        return combine_results(results, self.spark)
+
+    # ------------------------------------------------------------------
+    # Developer helpers
+    # ------------------------------------------------------------------
+
+    def guide(self) -> None:
+        """Print a concise step-by-step usage guide to stdout."""
+        W = 70
+        print("─" * W)
+        print("  databricks-excel-ingest-framework — Usage Guide")
+        print("─" * W)
+        print("""
+STEP 1 — Instantiate the framework
+────────────────────────────────────
+  from excel_ingest import ExcelIngestFramework
+
+  # Rule-only (no LLM — zero extra dependencies beyond openpyxl)
+  framework = ExcelIngestFramework(spark=spark)
+
+  # With Databricks Foundation Models LLM adapter (no endpoint setup needed)
+  from excel_ingest.mapping.adapters.databricks import DatabricksAdapter
+  framework = ExcelIngestFramework(spark=spark,
+                                   adapter=DatabricksAdapter())
+
+  # With OpenAI or Anthropic adapter
+  from excel_ingest.mapping.adapters.openai import OpenAIAdapter
+  from excel_ingest.mapping.adapters.anthropic import AnthropicAdapter
+  framework = ExcelIngestFramework(spark=spark,
+                                   adapter=OpenAIAdapter())        # reads OPENAI_API_KEY
+  framework = ExcelIngestFramework(spark=spark,
+                                   adapter=AnthropicAdapter())     # reads ANTHROPIC_API_KEY
+
+STEP 2 — Define your canonical dictionary (any domain)
+────────────────────────────────────────────────────────
+  # Fully caller-supplied — no hardcoded fields in the package.
+  # Keys = your target field names.  Values = known aliases in source files.
+  canonical_dict = {
+      "order_id":     ["order id", "order no", "transaction id"],
+      "product_name": ["product name", "item name", "description"],
+      "store_name":   ["store name", "store", "retail unit"],
+      "quantity":     ["qty", "quantity", "units"],
+      # ... add as many fields as needed for your domain
+  }
+
+STEP 3 — Run the full pipeline (recommended)
+──────────────────────────────────────────────
+  result = framework.ingest(
+      file_path      = "/Volumes/<catalog>/<schema>/<volume>/data.xlsx",
+      canonical_dict = canonical_dict,
+      country_code   = "UK",              # optional ISO-2 hint for LLM adapter
+      file_id        = "ORDERS_2026_Q1",  # optional — defaults to filename
+      # config       = FileProcessingConfig(sheet_name="Orders"),  # multi-sheet files
+      # password     = "secret",          # password-protected files
+      # prior_mappings = {...},            # boosts confidence for known headers
+  )
+
+  NOTE: sheet_name is MANDATORY when a file has more than one visible sheet.
+
+  # Aggregate summary — one row per file
+  display(spark.createDataFrame([result.summary_record()]))
+  # → file_id | success | total_cols | auto_approved | needs_review | requires_human | unmapped
+
+  # Full per-column detail — scrollable table
+  display(spark.createDataFrame(result.mapping_records()))
+  # → col_index | col_letter | hierarchical_header | db_canonical_bronze_column_name
+  #   | canonical_field | mapping_status | status_description | requires_action
+  #   | mapping_method | final_confidence | rule_score | ...
+
+STEP 4 — Act on mapping results (no enum imports needed)
+──────────────────────────────────────────────────────────
+  # mapping_records() includes status_description and requires_action as columns —
+  # you never need to import or switch on MappingStatus to act on results.
+
+  df = spark.createDataFrame(result.mapping_records())
+
+  # Columns that need human review before loading
+  df.filter("requires_action = true").display()
+
+  # Only auto-approved mappings (safe to load without review)
+  df.filter("mapping_status = 'AUTO_APPROVED'").display()
+
+  Confidence formula:
+    With LLM:    final = 0.7 × rule_score + 0.3 × llm_confidence
+    Without LLM: final = rule_score
+    > 0.9  → AUTO_APPROVED | 0.7–0.9 → NEEDS_REVIEW | < 0.7 → REQUIRES_HUMAN
+
+STEP 5 — Understand the two output column names
+─────────────────────────────────────────────────
+  Each column in the mapping output has two distinct identifiers:
+
+  db_canonical_bronze_column_name
+    The SQL-safe Delta column name for the bronze table — derived from the
+    Excel hierarchical header. This is the name to use in your CREATE TABLE
+    statement and when reading from the bronze table.
+    Example: [Cost & Margin].[Margin %]  →  cost_and_margin__margin_pct
+
+  canonical_field
+    The business field name from your canonical_dict — this is the silver-layer
+    mapping target. One bronze column maps to one canonical field.
+    Example: cost_and_margin__margin_pct  →  margin_pct
+
+  Bronze layer = as-is Excel structure, using db_canonical_bronze_column_name.
+  Silver layer = business schema, using canonical_field.
+
+STEP 6 — Build a bronze Delta table from metadata
+───────────────────────────────────────────────────
+  from excel_ingest import build_superset_schema
+  from excel_ingest.structure import FileProcessingConfig
+
+  # Run Stage 3 on each file (no canonical_dict needed at this step)
+  all_metadata = []
+  for file_path in my_files:
+      structure = framework.detect_structure(file_path, config=...)
+      meta      = framework.extract_metadata(file_path, structure)
+      all_metadata.append(meta)
+
+  # Superset of all column names across all files
+  # Files with fewer columns simply have NULL in the extra columns
+  all_cols = build_superset_schema(all_metadata)
+  # → ['city', 'customer_id', 'gross_amount', 'order_date', 'order_id', 'product_name', ...]
+
+  # DDL — all columns as STRING; cast to correct types in the silver layer
+  col_defs = ", ".join(f"`{c}` STRING" for c in all_cols)
+  ddl = f"CREATE TABLE IF NOT EXISTS {{MY_CATALOG}}.{{INGEST_SCHEMA}}.orders_bronze ({col_defs}, source_file STRING, source_sheet STRING)"
+  spark.sql(ddl)
+
+  # Per file: bronze_schema() maps column name → column index in that file
+  schema = meta.bronze_schema()
+  # → {"order_id": 1, "order_date": 2, "product_name": 5, ...}
+  # Columns absent from this file are NULL-filled when writing to the superset table.
+
+STEP 7 — Persist results to Delta (optional)
+──────────────────────────────────────────────
+  # File-level summary
+  spark.createDataFrame([result.file_record()]).write \\
+      .mode("append").saveAsTable(f"{MY_CATALOG}.{INGEST_SCHEMA}.excel_file_metadata")
+
+  # Column metadata (includes db_canonical_bronze_column_name)
+  spark.createDataFrame(result.metadata_records()).write \\
+      .mode("append").saveAsTable(f"{MY_CATALOG}.{INGEST_SCHEMA}.excel_column_metadata")
+
+  # Canonical mapping spec (bronze col → canonical field)
+  spark.createDataFrame(result.mapping_records()).write \\
+      .mode("append").saveAsTable(f"{MY_CATALOG}.{INGEST_SCHEMA}.excel_canonical_mappings")
+
+STAGE-BY-STAGE (for debugging or inspection)
+──────────────────────────────────────────────
+  from excel_ingest.structure import FileProcessingConfig
+
+  v        = framework.validate(file_path)                           # Stage 1
+  s        = framework.detect_structure(file_path, config=config)    # Stage 2
+  meta     = framework.extract_metadata(file_path, s, file_id="x")  # Stage 3
+  mappings = framework.map_to_canonical(meta, canonical_dict)        # Stage 4
+
+STEP 8 — Load actual data rows into a Spark DataFrame
+───────────────────────────────────────────────────────
+  result = framework.load(
+      file_path  = path,
+      structure  = structure,       # from detect_structure()
+      metadata   = meta,            # from extract_metadata()
+      # password = "secret",        # password-protected files
+      # config   = override_config, # FileProcessingConfig with ignore_rows etc.
+      # skip_hidden_columns = True, # exclude Excel hidden columns (default: False)
+  )
+
+  result.df      # Spark DataFrame — bronze column names + 3 auto-columns
+  result.df.printSchema()
+  display(result.df)
+
+  # Auto-columns always present at the end of result.df:
+  #   source_file      (STRING)     — filename, not full path
+  #   source_sheet     (STRING)     — sheet name
+  #   insert_timestamp (TIMESTAMP)  — datetime when load() was called
+
+  result.df.write.mode("append").saveAsTable("bronze.sales")
+
+  # Override per-file config from a Delta table (no code change needed):
+  overrides_df  = spark.table("my_catalog.config.excel_overrides")
+  overrides_map = {
+      row["file_name"]: FileProcessingConfig.from_override(row)
+      for row in overrides_df.collect()
+  }
+  config = overrides_map.get(filename, FileProcessingConfig())
+  result = framework.load(path, structure, meta, config=config)
+
+STEP 9 — Combine multiple files into one DataFrame
+─────────────────────────────────────────────────────
+  # Use when multiple files share a similar column structure and should land
+  # in the same Delta table. Missing columns are NULL-filled automatically.
+  all_results = []
+  for cfg in FILE_CONFIGS:
+      path      = f"{VOLUME_PATH}/{cfg['file']}"
+      structure = framework.detect_structure(path, config=cfg["config"])
+      meta      = framework.extract_metadata(path, structure)
+      result    = framework.load(path, structure, meta)
+      all_results.append(result)
+
+  combined_df = framework.combine(all_results)
+  display(combined_df)
+  combined_df.write.mode("append").saveAsTable("bronze.all_regional_sales")
+
+  # For files with completely different schemas — keep them separate instead:
+  for cfg, result in zip(FILE_CONFIGS, all_results):
+      result.df.write.mode("append").saveAsTable(cfg["table"])
+
+OTHER METHODS
+─────────────
+  framework.guide()                       # this guide
+  framework.sample_usage(spark)           # extract sample notebooks to Workspace
+""".rstrip())
+        print("─" * W)
+
+    def sample_usage(self, spark) -> str:
+        """Extract bundled sample notebooks to the current user's Workspace folder.
+
+        Returns the path where the notebooks were extracted.
+        Safe to re-run — skips files already up-to-date.
+
+        Usage::
+
+            path = framework.sample_usage(spark)
+            print(f"Sample notebooks extracted to: {path}")
+        """
+        try:
+            repo_user = spark.sql("SELECT current_user()").first()[0]
+        except Exception:
+            repo_user = os.environ.get("USER", "unknown")
+
+        dest = f"/Workspace/Users/{repo_user}/databricks-excel-ingest-framework/sample_usage"
+        os.makedirs(dest, exist_ok=True)
+
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
+        bundled = os.path.join(pkg_dir, "sample_usage")
+
+        def _copy_if_newer(src: str, dst: str) -> bool:
+            src_mtime = os.path.getmtime(src)
+            dst_mtime = os.path.getmtime(dst) if os.path.exists(dst) else 0
+            if src_mtime > dst_mtime:
+                shutil.copy2(src, dst)
+                return True
+            return False
+
+        copied: List[str] = []
+        if os.path.isdir(bundled):
+            # Copy top-level notebook files
+            for fname in sorted(os.listdir(bundled)):
+                src = os.path.join(bundled, fname)
+                if not os.path.isfile(src):
+                    continue
+                if _copy_if_newer(src, os.path.join(dest, fname)):
+                    copied.append(fname)
+
+            # Copy samples/ subfolder (Excel files)
+            samples_src = os.path.join(bundled, "samples")
+            samples_dst = os.path.join(dest, "samples")
+            if os.path.isdir(samples_src):
+                os.makedirs(samples_dst, exist_ok=True)
+                for fname in sorted(os.listdir(samples_src)):
+                    src = os.path.join(samples_src, fname)
+                    if not os.path.isfile(src):
+                        continue
+                    if _copy_if_newer(src, os.path.join(samples_dst, fname)):
+                        copied.append(f"samples/{fname}")
+
+        if copied:
+            print(f"Extracted {len(copied)} file(s) to: {dest}")
+        else:
+            print(f"Sample files already up-to-date at: {dest}")
+
+        return dest
