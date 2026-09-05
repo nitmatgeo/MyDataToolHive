@@ -1,0 +1,591 @@
+# ETL Monitor Framework — Project Context
+
+## What this folder is
+
+An **open-source Python package** (`databricks-etl-monitor`) that provides metadata-driven
+ETL process monitoring for Databricks / Delta Lake environments.
+
+Ported from a SQL Server / ADF monitoring framework.  Deployed as a Python wheel and
+consumed in Databricks notebooks.
+
+Current version: see `pyproject.toml`.
+
+---
+
+## Files in this folder
+
+| File / Path | Purpose |
+|-------------|---------|
+| `etl_monitor/framework.py` | `ETLMonitorFramework` class — main entry point |
+| `etl_monitor/ddl_tables.py` | `DDL_STATEMENTS` dict + `TABLE_ORDER` — all table DDL |
+| `etl_monitor/seed_data.py` | `SEQUENCE_SEED` — 7 built-in workflow stage definitions |
+| `etl_monitor/__init__.py` | Package entry point — exposes `ETLMonitorFramework` |
+| `etl_monitor/sample_usage/` | Sample notebooks bundled inside the package |
+| `pyproject.toml` | Package metadata — PyPI name: `databricks-etl-monitor` |
+| `build_and_publish.bat` | Build and upload to PyPI |
+| `CHANGELOG.md` | Version history |
+
+---
+
+## Architecture
+
+```
+ETLMonitorFramework(spark, catalog, schema="etl")
+    └── setup()                        → schema + tables + views + seed (idempotent)
+    └── register_organisation(...)     → INSERT/UPDATE MERGE into ETLOrganisation
+    └── register_project(...)          → INSERT/UPDATE MERGE into ETLconfigProject
+    └── register_process(...)          → INSERT/UPDATE MERGE into ETLconfigProcess
+    └── register_task(...)             → INSERT/UPDATE MERGE into ETLconfigTasks
+    └── register_parameter(...)        → INSERT/UPDATE MERGE into ETLconfigParameters
+    └── generate_execution_steps(...)  → INSERT NQUE rows; Attempts-aware (see below)
+    └── get_pending_tasks(...)         → two modes (mirrors original p_ETLProcessingSteps):
+                                         · Orchestration (no task_id): non-DONE + IsActive=TRUE
+                                           + ForceSkip=FALSE tasks; re-joins ETLconfigTasks each call
+                                         · Per-task worker (task_id supplied): always 1 row;
+                                           Status='NULL' (string) = deactivated / ForceSkip / DONE / not generated
+                                           Replicates FROM (SELECT 'NULL') LEFT JOIN … COALESCE pattern
+    └── task(...)                      → self-guarding context manager: checks status at entry,
+                                         NQUE → DONE/FAIL; yields _TaskGuard(active, status)
+                                         if t.active=False → body executes but no DB writes
+                                         accepts log_message, log_type, log_code
+    └── task_status(...)               → returns 'NQUE'/'RQUE'/'FAIL'/'NULL' for explicit guards
+    └── skip_task(...)                 → sets ForceSkip=TRUE for this task in this run only
+    └── unskip_task(...)               → clears ForceSkip back to FALSE within same execution
+    └── start_task / end_task / fail_task
+    └── advance_watermark(...)         → manual DELTA_ID advance (KNOWN LIMITATION)
+    └── get_active_watermark(...)      → returns typed watermark value
+    └── get_status(...)                → task detail or summary rollup
+    └── status_reset(...)              → reset DONE → RQUE for day replay (not failure retry)
+    └── set_processing_mode(...)       → bulk / historic / live mode
+    └── generate_execution_id()        → static UUID generator
+    └── sample_usage(spark)            → extracts bundled sample notebooks to Workspace
+```
+
+---
+
+## Naming conventions — MUST follow exactly
+
+### Schema
+- **Default:** `schema="etl"` in constructor.
+- **Never mix** with DQ framework's `dq` schema.
+
+### Tables — ETL prefix + PascalCase
+
+```
+ETLconfigSequence      [FRAMEWORK-MANAGED — 7 built-in stages, auto-seeded]
+ETLconfigProcess       [USER-MANAGED — process / domain registry]
+ETLconfigTasks         [USER-MANAGED — task catalogue per process]
+ETLconfigParameters    [USER-MANAGED — delta watermarks + config flags]
+ETLProcessingSteps     [RESULTS — per-task live execution log, mutable]
+ETLsysLogs             [RESULTS — raw run receipts, append-only]
+```
+
+### Views — `v_` prefix
+
+```
+v_processStatus        v_runSummary        v_taskDetail
+v_mandatoryBlockers    v_currentFailures   v_watermarks
+```
+
+### Columns — PascalCase, original SQL Server names — NEVER rename
+```
+TaskID          WorkFlowID (capital F)    Attempts (plural, not Attempt)
+TaskMandatory   SequenceID                SourceSystemCode
+ProcessingDate  ExecutionID               LogMessage
+FileNameMask    FileExtension             InFilePath     OutFilePath
+FullFileName    WatermarkType             WatermarkValue
+```
+
+### Audit columns — ALL user-managed config tables have all four
+```
+CreatedOn      TIMESTAMP
+CreatedBy      STRING
+LastUpdatedOn  TIMESTAMP
+LastUpdatedBy  STRING
+```
+
+**CRITICAL — no DEFAULT expressions in DDL.**
+`DEFAULT current_timestamp()` / `DEFAULT current_user()` / `DEFAULT TRUE` etc. require
+the `delta.feature.allowColumnDefaults` table property to be explicitly enabled — not
+guaranteed across all DBR versions. This causes `WRONG_COLUMN_DEFAULTS_FOR_DELTA_FEATURE_NOT_ENABLED`
+on table creation.
+**All default values are passed explicitly in the Python INSERT/MERGE statements instead.**
+Never add `DEFAULT <expr>` to any column in `DDL_STATEMENTS`.
+
+### FQN — always backtick-quoted
+```python
+def _fqn(self, name: str) -> str:
+    if self.catalog:
+        return f"`{self.catalog}`.`{self.schema}`.`{name}`"
+    return f"`{self.schema}`.`{name}`"
+```
+
+---
+
+## Status values — exactly these four strings
+
+| Value | Full name | Meaning |
+|-------|-----------|---------|
+| `NQUE` | New Queue | Task created, first attempt, awaiting execution |
+| `RQUE` | Re-Queue | Reset from FAIL, retry attempt queued |
+| `DONE` | Done | Completed successfully |
+| `FAIL` | Failed | Failed — awaiting retry or investigation |
+
+State machine:
+```
+NQUE → DONE
+NQUE → FAIL                 ← any task failure; LOAD_GO reset to NQUE
+```
+
+Retry path — use a **new ExecutionID** (mirrors ADF re-trigger with new RunID):
+```
+Run 1: NQUE → FAIL  (Attempts=0 row stays as FAIL in history)
+Run 2 (new ExecutionID, same date):
+  generate_execution_steps() → Attempts=1
+    - tasks DONE at Attempts=0 → skipped (not re-inserted)
+    - tasks FAIL/NQUE at Attempts=0 → new NQUE rows at Attempts=1
+  NQUE → DONE  (retry succeeds)
+```
+
+Day replay — `status_reset()` resets DONE → RQUE to re-process a date that already completed:
+```
+DONE → [status_reset()] → RQUE → DONE
+```
+
+---
+
+## Task exclusion — IsActive vs ForceSkip
+
+Two mechanisms exist for skipping tasks. Use the right one for the scope of the decision.
+
+| | `ETLconfigTasks.IsActive` | `ETLProcessingSteps.ForceSkip` |
+|---|---|---|
+| Scope | **Permanent** — all future runs, all executions | **One run only** — this ExecutionID only |
+| Carries forward to retry? | Yes — config change persists | No — new ExecutionID generates `FALSE` |
+| Cleared by `status_reset()`? | No — config unchanged | **Yes** — day replay = clean slate |
+| Effect on `get_pending_tasks()` | Task absent from orchestration mode; `Status='NULL'` in per-task mode | Same as IsActive |
+| Effect on `task()` | `t.active=False`, no DB writes | Same as IsActive |
+| Use case | Task retired, under maintenance, or permanently disabled | Exclude one task from this specific run (e.g. upstream dependency not ready) |
+| How to set | `register_task(is_active=False)` or direct UPDATE | `monitor.skip_task(exec_id, ...)` |
+| How to clear | `register_task(is_active=True)` | `monitor.unskip_task(exec_id, ...)` or next retry |
+
+**Developer contract for task cells (both mechanisms respected automatically):**
+```python
+# Implicit — guard inside the with block:
+with monitor.task(exec_id, PROJECT, PROCESS,
+                  task_id=4, workflow_id=1, sequence_id=2,
+                  processing_date=DATE) as t:
+    if t.active:
+        actual_work()   # only runs when NQUE/RQUE/FAIL and not skipped
+    else:
+        print(f"→ skipped ({t.status})")   # optional else branch
+
+# Explicit — check before the block:
+status = monitor.task_status(exec_id, PROJECT, PROCESS, DATE,
+                              workflow_id=1, sequence_id=2, task_id=4)
+if status != 'NULL':
+    with monitor.task(...) as t:
+        actual_work()
+```
+
+---
+
+## ParameterType values — exactly these four
+
+| Value | Active column | Auto-advance on DONE? | Bulk mode |
+|-------|--------------|----------------------|-----------|
+| `DELTA_DATE` | `ValueDateTime` | Yes — set to task `StartTime` | `ValueDateTime = NULL` |
+| `DELTA_ID` | `ValueINT` | No — call `advance_watermark()` | `ValueINT = 0` |
+| `FLAG` | `ValueBIT` | No — read freely | Not applicable |
+| `SYSTEM` | `ValueDateTime` | No — `set_processing_mode()` only | `NULL` = live date |
+
+**KNOWN LIMITATION — DELTA_ID:** Framework cannot auto-detect the max integer ID from
+the source dataset. Developer must call `advance_watermark()` explicitly after load.
+
+**Future enhancement:** Accept an optional `new_delta_id` parameter in `end_task()` so the
+developer can pass the value in a single call without a separate `advance_watermark()` call.
+
+**Original framework note:** The original SQL Server framework used
+`ParameterDescription LIKE 'Delta Date;%'` string matching to detect watermark type.
+This was fragile and hard to query. The DBX version replaces it with an explicit
+`ParameterType` column — one of exactly four values above.
+
+---
+
+## WorkFlowID semantics
+
+| WorkFlowID | Meaning |
+|-----------|---------|
+| 0 | Initiation task — always `TaskID=0`, `SequenceID=0`; one per process; overall run status indicator. Reset to NQUE on **any** task FAIL (mandatory or not). |
+| 1 | First workflow pass (main load) |
+| 2 | Second pass (enrichment / additional fields / second data iteration) |
+| N | Nth iteration over the same data with a different scope |
+
+## Sequence stages (FRAMEWORK-MANAGED — auto-seeded by `setup()`)
+
+| SequenceID | SequenceCode | Description | SortOrder |
+|-----------|-------------|-------------|-----------|
+| 0 | `LOAD_GO` | Initiating ETL Processing | 0 |
+| 1 | `LOAD_DB_CONFIG` | Load Configuration Data from source | 1 |
+| 2 | `LOAD_DB_TRAN` | Load Transactional Data from source (staging) | 2 |
+| 3 | `LOAD_DIM` | Process Master Data — validate staged dimensions | 3 |
+| 4 | `LOAD_TRAN` | Process Transactional Data — validate staged transactions | 4 |
+| 5 | `PRE_PROCESS` | Functional Logic — business logic and derivations | 5 |
+| 6 | `PROCESS_DATA` | Core Data Transformation — output / data mart tables | 6 |
+
+Custom stages: `SequenceID >= 10`. Framework reserves 0–9.
+
+## SequenceID parallelism
+
+All active tasks sharing `(WorkFlowID, SequenceID)` for a process are **intended to run in parallel**.
+The ADF ForEach / Databricks Workflow fan-out handles the actual parallelism.
+Developer designs the fan-out accordingly.
+
+## Enterprise multi-org design intent
+
+**Design goal:** a single deployed instance of this framework (one catalog + `etl` schema)
+can serve an entire enterprise — multiple subsidiaries, divisions, delivery units, or clients —
+all sharing the same 8 Delta tables and 6 views without namespace collision.
+
+### The four-level hierarchy
+
+```
+Unity Catalog        ← environment / platform isolation (DEV / UAT / PROD)
+  ETLOrganisation    ← subsidiary / division / delivery unit / client entity
+    ETLconfigProject ← programme / department / project within an org
+      ETLconfigProcess (ProjectCode + ProcessLoad)
+                     ← individual data workstream within a project
+```
+
+### Why this structure exists
+
+| Layer | Original SQL Server | DBX framework | Why changed |
+|---|---|---|---|
+| Org | `ETLOrganisation` (single org row in practice) | `ETLOrganisation` | Explicit — supports multi-subsidiary, multi-client setups |
+| Project | `ETLconfigProject` (one project per deployment) | `ETLconfigProject` | Explicit — multiple programmes under one org |
+| Process | Not modelled — `ProcessLoad` was a free VARCHAR | `ETLconfigProcess` | **NEW** — promotes ProcessLoad to a first-class registered entity |
+| Catalog | Not applicable (SQL Server = one DB per env) | Unity Catalog | Replaces the SQL Server database-per-environment pattern |
+
+### Typical deployment patterns
+
+**Pattern A — Single org, single project** (simplest):
+```
+ETLOrganisation: CORP
+ETLconfigProject: HR        (under CORP)
+ETLconfigProcess: HR / EMPLOYEE_MASTER
+                  HR / PAYROLL_MONTHLY
+```
+
+**Pattern B — Single org, multiple departments** (most common enterprise use):
+```
+ETLOrganisation: CORP
+ETLconfigProject: HR        (under CORP)
+                  FINANCE   (under CORP)
+                  SUPPLY    (under CORP)
+ETLconfigProcess: HR / EMPLOYEE_MASTER
+                  FINANCE / GL_DAILY
+                  SUPPLY / INVENTORY_DAILY
+```
+
+**Pattern C — Multi-subsidiary or multi-client on one platform**
+(e.g. a shared Databricks workspace serving multiple business units or clients):
+```
+ETLOrganisation: CORP_UK
+                 CORP_US
+                 CORP_APAC
+ETLconfigProject: HR_UK    (under CORP_UK)
+                  HR_US    (under CORP_US)
+ETLconfigProcess: HR_UK / EMPLOYEE_MASTER
+                  HR_US / EMPLOYEE_MASTER   ← fully independent watermarks + execution history
+```
+
+All three patterns share **the same 8 tables** — the `OrganisationCode → ProjectCode → ProcessLoad`
+composite key ensures complete isolation between entities without needing separate schemas or catalogs.
+
+### When to use a separate catalog instead
+
+Use a **separate Unity Catalog** (not just separate org/project rows) when:
+- Different subsidiaries or clients must have **hard access control boundaries**
+  (e.g. client A must never be able to query client B's execution history)
+- Regulatory or contractual requirements mandate physical data separation
+
+Use **the same catalog with separate `OrganisationCode`** when:
+- All entities are within the same trust boundary (e.g. internal business units)
+- A central data engineering team manages the framework for all units
+- You want one dashboard (`v_processStatus`) showing cross-org run health
+
+## ProcessLoad scoping (enhancement over original SQL Server framework)
+
+Original framework used `(ProjectCode, ParameterName)` as the parameter key. This caused
+namespace collision when multiple processes under the same project share parameter names
+(e.g. `CORP / HR_DAILY / LoadEmployees` and `CORP / FIN_MONTHLY / LoadEmployees`).
+
+The DBX version adds `ProcessLoad` to the composite key across all user-managed tables.
+HR_DAILY and FIN_MONTHLY are fully independent — their tasks, watermarks, and execution
+histories do not interact.
+
+## SequenceID ranges
+
+```
+0–9    Framework-reserved (built-in LOAD_GO → PROCESS_DATA stages)
+≥ 10   Custom / project-specific stages
+```
+
+---
+
+## Stored procedure equivalence (for teams migrating from SQL Server)
+
+| Original stored procedure | Python method | Notes |
+|--------------------------|--------------|-------|
+| `p_ETLProcessingSteps` (GenerateMode=1) | `generate_execution_steps()` | First call: all tasks NQUE at Attempts=0. New ExecutionID same date: Attempts+1, skip DONE tasks. Same ExecutionID: no-op. **Period-aware NOT EXISTS:** D=same date, M=same YYYYMM (cross-date skip), Y=same YYYY. **FullFileName computed** by LoadFrequency at generate time. |
+| `p_ETLProcessingSteps` (GenerateMode=0, per-task) | `get_pending_tasks(..., task_id=N, workflow_id=N, sequence_id=N)` | **Always returns exactly 1 row.** `Status='NULL'` (string) = task is deactivated (`IsActive=FALSE`), already DONE, or not generated → skip. Any other status = task is runnable → execute. Replicates the original `FROM (SELECT 'NULL' AS STATUS) LEFT JOIN … COALESCE(S.status, STATUS.status)` pattern. Includes `FullFileName`, `InFilePath`, `OutFilePath`, `WatermarkValue`, `WatermarkType`. **Developer contract:** `if row["Status"] != 'NULL':` — replaces the ADF `IfCondition @not(equals(status,'NULL'))` gate. |
+| `p_ETLOrchestrationSteps` | `get_pending_tasks()` (no `task_id`) | Returns all non-DONE, `IsActive=TRUE` tasks. Re-joins `ETLconfigTasks` so deactivated tasks disappear even if already generated. Auto-generates steps on first call. Used by ADF ForEach and notebook batch loops. |
+| `p_ETLProcessingStatusUpdate` | `end_task()` / `fail_task()` | Status + timing write-back; DELTA_DATE auto-advance on DONE; LOAD_GO → NQUE on any FAIL |
+| *(new — no SQL equivalent)* | `task()` context manager | Self-guarding: checks status at entry; yields `_TaskGuard(active, status)`. Use `if t.active:` to gate work. `IsActive=FALSE` or `ForceSkip=TRUE` → `t.active=False`, no DB writes. |
+| *(new — no SQL equivalent)* | `task_status()` | Returns `'NQUE'/'RQUE'/'FAIL'/'NULL'` for explicit pre-check before `task()`. |
+| *(new — no SQL equivalent)* | `skip_task()` | Sets `ForceSkip=TRUE` in ETLProcessingSteps for this task/run. Run-level exclusion — does not touch ETLconfigTasks. Not carried to retry runs. |
+| *(new — no SQL equivalent)* | `unskip_task()` | Clears `ForceSkip=FALSE` within the same execution (mid-run re-enable). |
+| `p_ETLProcessingStatusGet` | `get_status()` | Summary or task-level detail; `summary_mode=True` for rollup |
+| `p_ETLProcessingStatusReset` | `status_reset()` | DONE → RQUE for day replay; NOT for failure retry (use new ExecutionID for that) |
+| `p_ETLconfigProcessingMode` | `set_processing_mode()` | Historic mode, live mode, bulk mode, specific param |
+
+---
+
+## File-based source tasks — naming and period-aware skip
+
+### ETLconfigTasks file columns
+```
+FileNameMask   STRING   — base filename without date suffix (e.g. payroll_uk)
+FileExtension  STRING   — e.g. '.csv', '.xlsx' (include the dot)
+InFilePath     STRING   — ADLS/storage base folder (e.g. abfss://raw@store.dfs.core.windows.net/payroll/uk/)
+OutFilePath    STRING   — output/processed folder (NULL if not needed)
+```
+NULL `FileNameMask` = non-file task; all four columns stay NULL.
+
+### ETLProcessingSteps snapshot columns (computed at generate time)
+```
+FullFileName   STRING   — FileNameMask + date suffix + FileExtension
+InFilePath     STRING   — snapshot of ETLconfigTasks.InFilePath
+OutFilePath    STRING   — snapshot of ETLconfigTasks.OutFilePath
+```
+
+### FullFileName date suffix by LoadFrequency (mirrors original SQL Server framework)
+| LoadFrequency | Format | Example (2026-04-09) |
+|---|---|---|
+| `D` | `_yyyyMMdd` | `payroll_uk_20260409.csv` |
+| `M` | `_yyyyMM`   | `payroll_uk_202604.csv` |
+| `Y` | `_yyyy`     | `payroll_uk_2026.csv` |
+
+### Period-aware NOT EXISTS in generate_execution_steps()
+The original SQL Server SP only checked `ProcessingDate = @ProcessingDate` — causing monthly
+files to be re-inserted every day of the month. The DBX framework improves on this:
+
+| LoadFrequency | Skip condition |
+|---|---|
+| `D` | DONE on same ProcessingDate, Attempts < current |
+| `M` | DONE on **any** date in same calendar `YYYYMM` (cross-date guard) |
+| `Y` | DONE on **any** date in same calendar `YYYY` (cross-date guard) |
+| other | Same as `D` |
+
+**Implication:** a monthly file loaded on April 5 will NOT be re-inserted on April 6, 7, etc.
+**Force reload:** `status_reset()` DONE → RQUE removes the DONE guard → next generate inserts NQUE.
+
+### get_pending_tasks() output — ADF integration columns
+`WatermarkValue` (STRING) replaces the original `#DELTAPARAMETER#` inline substitution.
+ADF reads this from the `get_pending_tasks` result and builds its own `@concat()` query.
+`FullFileName` + `InFilePath` tell ADF where to find the input file.
+
+---
+
+## INSERT-ONLY MERGE pattern — all config writes
+
+```sql
+MERGE INTO `<catalog>`.`etl`.`ETLconfigTasks` AS tgt
+USING (SELECT ...) AS src
+ON  tgt.TaskID     = src.TaskID
+AND tgt.WorkFlowID = src.WorkFlowID
+AND COALESCE(tgt.ProjectCode,'') = COALESCE(src.ProjectCode,'')
+AND COALESCE(tgt.ProcessLoad, '') = COALESCE(src.ProcessLoad, '')
+WHEN NOT MATCHED THEN INSERT (...) VALUES (...);
+```
+
+**MERGE pattern for config writes:**
+- `WHEN MATCHED AND (changes detected) THEN UPDATE` — updates mutable fields only.
+- `WHEN NOT MATCHED THEN INSERT` — inserts new row.
+- Natural keys (TaskID, WorkFlowID, ProjectCode, ProcessLoad, ParameterName) and
+  audit creation fields (CreatedOn, CreatedBy) are **never overwritten on UPDATE**.
+- Watermark value columns (ValueDateTime, ValueINT, ValueBIT) in ETLconfigParameters
+  are **never overwritten on UPDATE** — use `advance_watermark()` or `set_processing_mode()`.
+- **Always use `COALESCE`** for nullable string keys in `MERGE ON` conditions — never
+  `IS DISTINCT FROM` or `NOT (col <=> val)`.
+
+---
+
+## Key design patterns
+
+### Pattern A — Composite execution key
+`(ProcessingDate, ProjectCode, ProcessLoad, ExecutionID, WorkFlowID, TaskID, SequenceID, Attempts)`
+Every row in `ETLProcessingSteps` is uniquely addressable for replay, retry, and historical comparison.
+
+### Pattern B — INSERT-ONLY MERGE for config writes
+All config upserts use `MERGE INTO ... WHEN NOT MATCHED THEN INSERT`.
+Safe to re-run without overwriting existing user modifications.  Never add `WHEN MATCHED THEN UPDATE`
+to config MERGE statements.
+
+### Pattern C — COALESCE in MERGE ON clause
+```sql
+ON  COALESCE(tgt.ProjectCode,  '') = COALESCE(src.ProjectCode,  '')
+AND COALESCE(tgt.ProcessLoad,  '') = COALESCE(src.ProcessLoad,  '')
+AND COALESCE(tgt.ParameterName,'') = COALESCE(src.ParameterName,'')
+```
+Handles nullable string keys safely.  Never use `IS DISTINCT FROM` or `NOT (col <=> val)`.
+
+### Pattern D — `_fqn()` helper
+Identical to DQ framework pattern.  Backtick-quoting handles names with hyphens or reserved words.
+
+### Pattern E — Context manager (`with monitor.task(...)`)
+Writes NQUE at entry, DONE on clean exit, FAIL on exception.  UUID generated per run via
+`ETLMonitorFramework.generate_execution_id()`.
+Optional parameters `log_message`, `log_type`, `log_code` (all `str | None`) are passed
+to `end_task()` on DONE; on FAIL the exception string is captured automatically.
+
+### Pattern F — Snapshot columns in ETLProcessingSteps
+`TaskName`, `SequenceCode`, `TaskMandatory`, `SourceSystemCode` copied from config tables
+at `generate_execution_steps()` time.  History stays accurate even if the task catalogue
+is later changed or tasks are deactivated.
+
+`FullFileName`, `InFilePath`, `OutFilePath` also snapshotted at generate time:
+- `FullFileName` is **computed** (not just copied) — `FileNameMask` + date suffix by `LoadFrequency`
+  + `FileExtension`.  Mirrors the original SQL Server framework's `FullFileName` column.
+- Callers (ADF / notebooks) combine `InFilePath + '/' + FullFileName` for the full file URL.
+
+---
+
+## ADF integration
+
+`v_watermarks.ActiveValue` is a resolved STRING suitable for ADF Lookup activity:
+
+```sql
+SELECT ActiveValue FROM `<catalog>`.`etl`.`v_watermarks`
+WHERE ProjectCode='RETAIL' AND ProcessLoad='DAILY_LOAD' AND ParameterName='LoadProducts'
+```
+
+ADF Copy Activity source expression:
+```
+@concat('SELECT * FROM dbo.Products WHERE ModifiedDate > ''',
+        activity('GetWatermark').output.firstRow.ActiveValue, '''')
+```
+
+### ADF write-back via utility notebooks
+ADF calls a Databricks Notebook activity passing widget parameters.
+Three lightweight utility notebooks are created per project (not shipped with this package):
+All three utility notebooks share the same widget set:
+`execution_id`, `project_code`, `process_load`, `task_id`, `workflow_id`, `sequence_id`,
+`processing_date`, `source_type`, `attempts`, `log_message`, `log_type`, `log_code`, `timestamp`
+
+- `etl_start_task.py` → `monitor.start_task(...)` — `timestamp` used as `StartTime`.
+- `etl_end_task.py`   → `monitor.end_task(...)` — `timestamp` used as `EndTime`; `DurationSeconds = StartTime → timestamp`.
+- `etl_fail_task.py`  → `monitor.fail_task(...)` — same `timestamp` semantics as `end_task`.
+
+`timestamp` is an optional ISO timestamp string (e.g. `"2026-04-14T08:30:00"`). Pass the actual
+compute start/end time from the DBX job run or ADF pipeline activity when it differs from the
+moment the utility notebook executes. Defaults to `current_timestamp()` — existing behaviour
+is unchanged when not supplied.
+
+### ADF ForEach over pending tasks
+ADF ForEach iterates `get_pending_tasks()` output.
+Tasks sharing the same `SequenceID` are dispatched in parallel (ADF parallel ForEach).
+After each SequenceID stage completes, ADF checks `v_mandatoryBlockers` before advancing.
+
+---
+
+## What was NOT ported
+
+| Original | Reason not ported |
+|----------|------------------|
+| Trigger / orchestration logic | Out of scope — this framework observes only, never triggers |
+| `#DELTAPARAMETER#` string substitution | Replaced by `v_watermarks.ActiveValue` |
+| `ADFMain` / `ADFPipelines` / `ADFMetaData` | ADF pipeline driver config — not needed for monitoring |
+| `ETLconfigNotifications` | Replace with Databricks SQL Alerts or Lakeview dashboards |
+| T-SQL stored procedures | Replaced entirely by Python class methods |
+
+---
+
+## Key rules — always apply
+
+1. **Databricks SQL syntax only** — `CREATE TABLE IF NOT EXISTS`, `USING DELTA`, backtick FQNs,
+   `current_timestamp()`, `current_user()`, `GENERATED ALWAYS AS IDENTITY`.
+2. **Original SQL Server column names** — `WorkFlowID` (capital F), `Attempts` (plural),
+   `TaskMandatory`, `SequenceID`. Never revert to snake_case.
+3. **`v_` prefix for all views** — `v_runSummary` not `vw_run_summary`.
+4. **`<catalog>` placeholder in SQL** — never hardcode a real catalog name.
+5. **Schema is always `etl`** unless the user overrides it explicitly.
+6. **Status values are exactly:** `NQUE`, `RQUE`, `DONE`, `FAIL`.
+7. **ParameterType values are exactly:** `DELTA_DATE`, `DELTA_ID`, `FLAG`, `SYSTEM`.
+8. **No triggering logic** — framework only observes and records; never starts or schedules jobs.
+9. **No PII or client/org names** in any generated code or SQL.
+10. **COALESCE in MERGE ON clauses** for nullable string keys.
+11. **DELTA_ID KNOWN LIMITATION** — always note that developer must call `advance_watermark()`.
+12. **All four audit columns on every config table** — `CreatedOn`, `CreatedBy`,
+    `LastUpdatedOn`, `LastUpdatedBy`.
+13. **Snapshot columns** — `TaskName`, `SequenceCode`, `TaskMandatory`, `SourceSystemCode`
+    are copied into `ETLProcessingSteps` at `generate_execution_steps()` time.
+    History remains accurate even if the catalogue changes later.
+14. **File columns** — `FullFileName`, `InFilePath`, `OutFilePath` also snapshotted at generate time.
+    `FullFileName` is **computed** — `FileNameMask` + date suffix by `LoadFrequency` + `FileExtension`.
+    NULL `FileNameMask` = non-file task. Never manually insert FullFileName — always let generate compute it.
+15. **Period-aware NOT EXISTS** — `generate_execution_steps()` uses cross-date DONE guard for M and Y frequency
+    tasks. A monthly file DONE on day 5 blocks re-insertion on day 6+. `status_reset()` is the only
+    authorised path to force a same-period reload.
+16. **`get_pending_tasks()` returns `WatermarkValue`** — joined from `ETLconfigParameters` on
+    `SourceSystemCode = ParameterName`. This is the DBX equivalent of `#DELTAPARAMETER#` value.
+    ADF uses it in `@concat()` expressions. Do not substitute inline — return as a plain column.
+
+---
+
+## Quick usage reference
+
+```python
+from etl_monitor import ETLMonitorFramework
+
+monitor = ETLMonitorFramework(spark, catalog="<catalog>", schema="etl")
+monitor.setup()   # idempotent
+
+# Register (once per process/task/parameter)
+monitor.register_process("CORP", "HR_DAILY", name="HR Daily Load")
+monitor.register_task("CORP", "HR_DAILY", task_id=1, workflow_id=1, sequence_id=2,
+                      task_name="Load Employees", source_system_code="LoadEmployees")
+monitor.register_parameter("CORP", "HR_DAILY", "LoadEmployees", "DELTA_DATE")
+
+# Each run — first attempt
+exec_id = ETLMonitorFramework.generate_execution_id()
+monitor.generate_execution_steps(exec_id, "CORP", "HR_DAILY", "2026-04-09")
+
+with monitor.task(exec_id, "CORP", "HR_DAILY",
+                  task_id=1, workflow_id=1, sequence_id=2,
+                  processing_date="2026-04-09",
+                  log_message="Loaded 1234 rows"):
+    pass   # your notebook logic here
+
+# Failure retry — ADF re-triggers with a new RunID = new ExecutionID
+exec_id_2 = ETLMonitorFramework.generate_execution_id()
+monitor.generate_execution_steps(exec_id_2, "CORP", "HR_DAILY", "2026-04-09")
+# Attempts=1; DONE tasks from exec_id skipped; FAIL/NQUE tasks re-inserted
+
+# Day replay (re-run an already-completed date)
+monitor.status_reset("CORP", "HR_DAILY", processing_date="2026-04-09")  # DONE → RQUE
+```
+
+---
+
+## Package build and publish
+
+```bash
+python -m build
+build_and_publish.bat
+```
+
+Installed on clusters via:
+```python
+%pip install databricks-etl-monitor
+```
