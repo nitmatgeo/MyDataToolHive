@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "databricks-dq-framework"
-version = "1.1.0"
+version = "1.1.1"
 description = "Metadata-driven Data Quality Assessment Framework for Databricks / Delta Lake"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -21,6 +21,12 @@ dependencies = [
     "python-dateutil>=2.8",
     "pandas>=2.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/nitmatgeo/MyDataToolHive"
+Repository = "https://github.com/nitmatgeo/MyDataToolHive"
+"Source Code" = "https://github.com/nitmatgeo/MyDataToolHive/tree/main/databricks-dq-framework"
+"Bug Tracker" = "https://github.com/nitmatgeo/MyDataToolHive/issues"
 
 [project.optional-dependencies]
 standalone = [

@@ -4,6 +4,18 @@ All notable changes to `databricks-dq-framework` are documented here.
 
 ---
 
+## [1.1.1] — 2026-09-11
+
+### Added
+- `[project.urls]` in `pyproject.toml` — Homepage, Repository, Source Code, and Bug Tracker
+  links now point to `https://github.com/nitmatgeo/MyDataToolHive`.
+- PyPI version badge and GitHub source badge added to `README.md`.
+- GitHub Copilot instruction file (`.github/instructions/dq-framework.instructions.md`) —
+  scoped Copilot context for `databricks-dq-framework/**` files, covering full architecture,
+  assessment flow, pattern precedence, DQRowID mechanics, and naming rules.
+
+---
+
 ## [1.0.37] — 2026-04-09
 
 ### Changed

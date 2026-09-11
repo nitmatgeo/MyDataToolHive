@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "databricks-etl-monitor"
-version = "0.1.1"
+version = "0.1.2"
 description = "Metadata-driven ETL Process Monitoring Framework for Databricks / Delta Lake"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -33,7 +33,10 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/NitMatGeo"
+Homepage = "https://github.com/nitmatgeo/MyDataToolHive"
+Repository = "https://github.com/nitmatgeo/MyDataToolHive"
+"Source Code" = "https://github.com/nitmatgeo/MyDataToolHive/tree/main/databricks-etl-monitor"
+"Bug Tracker" = "https://github.com/nitmatgeo/MyDataToolHive/issues"
 
 [project.optional-dependencies]
 standalone = [
