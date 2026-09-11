@@ -39,8 +39,10 @@ ExcelIngestFramework(spark=None, adapter=None)
     │         .data_range     → "A2:L21"  (Excel A1 notation)
     │         .merged_cells, .blank_column_indices, .hidden_column_indices
     │
-    ├── .extract_metadata(file_path, structure, file_id)   ← NO password param at Stage 3
+    ├── .extract_metadata(file_path, structure=None, file_id=None, password=None, config=None)
     │       → MetadataExtractionResult  [metadata.py]
+    │         If structure is not supplied, detect_structure() is called automatically
+    │         (password and config are forwarded to that auto-detect call only).
     │         .file_metadata.header_signature  (SHA-256 of all column headers)
     │         .column_metadata[n]:
     │             .hierarchical_header          "[Parent].[Child]" or "[Header]"
@@ -52,7 +54,8 @@ ExcelIngestFramework(spark=None, adapter=None)
     │         .signature_record()    → Dict — file_id, file_name, sheet_name, header_signature
     │         .bronze_schema()       → Dict[col_name → col_index] for non-blank columns only
     │
-    ├── .map_to_canonical(metadata, canonical_dict, country_code, prior_mappings, adapter)
+    ├── .map_to_canonical(metadata, canonical_dict, country_code=None, prior_mappings=None,
+    │                     adapter=None, skip_blank_columns=True)
     │       → List[CanonicalMapping]  [mapping/engine.py]
     │         .canonical_field          ← silver target
     │         .mapping_status           AUTO_APPROVED | NEEDS_REVIEW | REQUIRES_HUMAN | UNMAPPED
@@ -67,15 +70,31 @@ ExcelIngestFramework(spark=None, adapter=None)
     ├── .combine(results)   ← list of LoadResult
     │       → pyspark.sql.DataFrame  (union, NULL-filled)
     │
-    └── .ingest(file_path, canonical_dict, ...)   ← full pipeline, one call
+    ├── .guide()            → None  [step-by-step usage printed to stdout]
+    ├── .sample_usage(spark)→ str   [extracts bundled notebooks to /Workspace/Users/{you}/...]
+    │
+    └── .ingest(file_path, canonical_dict, config=None, password=None, file_id=None,
+                country_code=None, prior_mappings=None, adapter=None,
+                skip_blank_columns=True)
             → IngestResult
-              .summary_record()    → Dict — aggregate mapping counts
+              .success (bool), .errors (List[str])
+              .summary_record()    → Dict — file_id, total_cols, auto_approved,
+                                            needs_review, requires_human, unmapped
               .mapping_records()   → List[Dict] — per-column detail
               .metadata_records()  → List[Dict] — column metadata for Delta
-              .file_record()       → Dict — file-level summary for Delta
+              .file_record()       → Optional[Dict] — None if metadata failed
 
 FileProcessingConfig  [structure.py]
     .from_override(dict_or_spark_row)   ← classmethod, builds from dict or Spark Row
+
+Module-level exports (all importable directly from `excel_ingest`):
+    ExcelIngestFramework, IngestResult
+    FileValidationResult, ValidationStatus, VALIDATION_RECORD_FIELDS
+    FileStructureMetadata, FileProcessingConfig, FileStatus, STRUCTURE_RECORD_FIELDS
+    MetadataExtractionResult, combine_column_records, build_superset_schema
+    COLUMN_RECORD_FIELDS, SIGNATURE_RECORD_FIELDS
+    LoadResult
+    map_to_canonical, CanonicalMapping, MappingStatus, MappingMethod
 
 LLM adapters (all optional, gated behind extras):
     DatabricksAdapter(model="databricks-llama-3-70b-instruct", host=None, token=None)
@@ -200,6 +219,7 @@ dbutils.library.restartPython()
 - **No hardcoded canonical fields** — the canonical dictionary is 100% caller-supplied.
 - **LLM adapters are always optional** — gated behind `try/except ImportError`. Core pipeline must work with openpyxl only.
 - **`sheet_name` is MANDATORY for multi-sheet files** — flag this immediately.
+- **`skip_blank_columns=True` by default** in both `map_to_canonical()` and `ingest()` — blank separator columns are excluded from mapping. Pass `False` to include them.
 - **No Delta writes inside the package** — `.ingest()` returns dicts; caller writes to Delta.
 - **Never pin versions in docs or notebooks** — use `--upgrade` only.
 - **Version lives only in `pyproject.toml`**.

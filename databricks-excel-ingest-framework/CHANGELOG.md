@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.2] — 2026-09-11
+
+### Added
+- `[project.urls]` in `pyproject.toml` — Homepage, Repository, Source Code, and Bug Tracker
+  links now point to `https://github.com/nitmatgeo/MyDataToolHive`.
+- PyPI version badge and GitHub source badge added to `README.md`.
+- GitHub Copilot instruction file (`.github/instructions/excel-ingest.instructions.md`) —
+  scoped Copilot context for `databricks-excel-ingest-framework/**` files, covering full
+  architecture, bronze vs silver distinction, all pipeline patterns, confidence scoring,
+  LLM adapter details, and naming rules.
+
+---
+
 ## [0.1.0a20] — 2026-04-21
 
 ### Added

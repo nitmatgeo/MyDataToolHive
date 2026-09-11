@@ -23,7 +23,8 @@ DQFramework(spark, catalog="main", schema="dq")
     └── setup()                        → schema + 9 tables + 2 views + seed (idempotent)
     └── dq.config (ConfigManager)
     │       └── register_field / set_field_values / block_category / allow_pattern
-    │       └── add_custom_query / add_mapping
+    │       └── block_pattern / add_pattern_rule
+    │       └── add_custom_query / add_custom_query_regex / add_custom_query_sql / add_mapping
     │       └── verify_config()        → dup _ID + dup logical rules + FK integrity
     │       └── show_config_summary()  → row counts + health banner
     │       └── field_rule_summary()   → flat Excel-ready config audit DataFrame
@@ -33,7 +34,16 @@ DQFramework(spark, catalog="main", schema="dq")
     └── run_assessment(schema=...)     → run all checks, MERGE write-back on DQRowID
     └── violations / quality_scores / summary_by_violation_type / summary_by_table
     └── fields_below_threshold / field_rule_summary
-    └── inspect_checker(fn_name)       → print compiled rule breakdown for a field
+    └── inspect_checker(fn_name, show_all_patterns=False)
+    │                                  → print compiled rule breakdown for a field
+    └── test_checker(fn_name, *values) → run checker against test values + print pass/fail + log message
+    └── register_validator(name, fn)   → register a Python callable for L02 PYTHON custom queries
+    └── add_invalid_keyword(keyword, pattern_id, priority, description)
+    │                                  → add project keyword to masterPattern (_ID >= 1000)
+    └── add_custom_pattern(pattern_id, pattern_category, pattern_name, ...)
+    │                                  → add any custom validation pattern to masterPattern
+    └── guide()                        → prints step-by-step usage guide to stdout
+    └── sample_usage(spark)            → extracts bundled sample notebooks to Workspace
 
 Tables (in <catalog>.<schema>):
   masterDataCategory        [FRAMEWORK-MANAGED — 27 type classifications]
@@ -81,18 +91,35 @@ dq.field_rule_summary().display()
 
 ---
 
+## FullFieldName — two valid patterns
+
+**Pattern A — Reusable (recommended for generic checks):**
+`FullFieldName = "email_address"` — a short logical name. Define rules once; map to
+as many physical columns and tables as needed via `mapDQChecks`. Use when the same
+validation logic applies across multiple tables.
+
+**Pattern B — Column-specific:**
+`FullFieldName = "Schema.Table.Column"` — exactly three dot-separated parts. Rules
+are tied to one exact column. Use when a column has unique constraints not shared elsewhere.
+
+Both patterns can coexist. Mix freely. `field_rule_summary("email_address")` accepts either form.
+
+---
+
 ## Register a field and configure DQ rules
 
 ```python
 dq.config \
-    .register_field(<_id>, "Schema.Table.Column",
+    .register_field(<_id>, "email_address",      # Pattern A — reusable
                     data_category_type_id=<category_id>) \
-    .set_field_values(<_id>, "Schema.Table.Column",
+    # OR: .register_field(<_id>, "Schema.Table.Column", ...)   # Pattern B — column-specific
+
+    .set_field_values(<_id>, "email_address",
                       min_data_length=<n>, max_data_length=<n>,
                       min_data_value=None, max_data_value=None) \
-    .block_category(<_id>, "Schema.Table.Column", "<PatternCategory>") \
-    .allow_pattern(<_id>, "Schema.Table.Column", "<PatternName>") \
-    .add_mapping(<_id>, "Schema.Table.Column",
+    .block_category(<_id>, "email_address", "<PatternCategory>") \
+    .allow_pattern(<_id>, "email_address", "<PatternName>") \
+    .add_mapping(<_id>, "email_address",
                  target_schema_name="<schema>",
                  target_table_name="<table>",
                  target_field_name="<column>",
@@ -136,14 +163,27 @@ dq.config.add_custom_query(
 
 Always specify `custom_query_type` explicitly — do not rely on auto-detect.
 
+Convenience wrappers (preferred):
+```python
+dq.config.add_custom_query_regex(<_id>, "Schema.Table.Column",
+                                 r"^[A-Z]{2}[0-9]{6}$", must_match=True,
+                                 description="2 uppercase + 6 digits")
+dq.config.add_custom_query_sql(<_id>, "Schema.Table.Column",
+                               "@InputValue IN ('ACTIVE', 'INACTIVE')",
+                               is_condition_allowed=True,
+                               description="Must be valid status")
+```
+
 ---
 
 ## Pattern precedence
 
 ```
-PatternName (most specific) > PatternSubCategory > PatternCategory (broadest)
-Within same specificity: Allowed overrides Not Allowed
+PatternName (specificity=3) > PatternSubCategory (specificity=2) > PatternCategory (specificity=1)
+Within same specificity: Allowed (1) overrides Not Allowed (0)
 ```
+
+**PatternPriority** controls evaluation ORDER (lower = earlier) — it does NOT affect which rule wins when two rules conflict. Typical values: Data=1, DataType1=2-3, SpecialCharacter=25-30, InvalidData=40-42.
 
 Classic pattern:
 ```python
@@ -163,6 +203,34 @@ dq.config.allow_pattern(3, "Source.Table.Field", "Has Hyphen")
 - NULL DQRowID rows silently skip the MERGE — always run `prepare_curated_tables()` first.
 
 ---
+
+## Debugging a checker
+
+```python
+# See what rules are compiled into a field checker
+dq.inspect_checker("fn_DQ_email_address")
+dq.inspect_checker("fn_DQ_email_address", show_all_patterns=True)  # list every L03 pattern
+
+# Run test values through the checker and see exact pass/fail + log message
+dq.test_checker("fn_DQ_email_address",
+                "user@example.com",  # expected PASS
+                "not-an-email",      # expected FAIL
+                "",                  # empty — expected FAIL
+                None)                # NULL — expected PASS (not applicable)
+```
+
+## run_assessment — full signature
+
+```python
+exec_id = dq.run_assessment(
+    schema_name="Curated",     # None = all schemas
+    table_name=None,           # None = all tables in schema
+    field_name=None,           # None = all fields in table
+    reset_eligible_flag=False, # True = clear prior DQ flags and exit (no assessment)
+    enable_output=True,        # False = suppress violation/score display
+    execution_id=None,         # supply a fixed UUID for grouped tracking
+)
+```
 
 ## Extend the schema
 

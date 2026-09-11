@@ -4,6 +4,19 @@ All notable changes to `databricks-etl-monitor` are documented here.
 
 ---
 
+## [0.1.2] — 2026-09-11
+
+### Added
+- `[project.urls]` in `pyproject.toml` — Homepage, Repository, Source Code, and Bug Tracker
+  links now point to `https://github.com/nitmatgeo/MyDataToolHive`.
+- PyPI version badge and GitHub source badge added to `README.md`.
+- GitHub Copilot instruction file (`.github/instructions/etl-monitor.instructions.md`) —
+  scoped Copilot context for `databricks-etl-monitor/**` files, covering full architecture,
+  WorkFlowID semantics, sequence stages, enterprise multi-org design, period-aware file skip,
+  snapshot columns, ADF integration, stored procedure equivalence, and all naming rules.
+
+---
+
 ## [0.1.0] — 2026-04-19
 
 ### Added
