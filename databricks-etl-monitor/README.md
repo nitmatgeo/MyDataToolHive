@@ -1,5 +1,8 @@
 # Databricks ETL Monitor Framework
 
+[![PyPI](https://img.shields.io/pypi/v/databricks-etl-monitor)](https://pypi.org/project/databricks-etl-monitor/)
+[![GitHub](https://img.shields.io/badge/GitHub-MyDataToolHive-blue?logo=github)](https://github.com/nitmatgeo/MyDataToolHive/tree/main/databricks-etl-monitor)
+
 A metadata-driven ETL process monitoring framework for Databricks / Delta Lake.
 
 Tracks ADF pipelines, Databricks notebooks, Databricks jobs, and Dataflows in a single

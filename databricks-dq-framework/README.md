@@ -1,5 +1,8 @@
 # Databricks DQ Assessment Framework
 
+[![PyPI](https://img.shields.io/pypi/v/databricks-dq-framework)](https://pypi.org/project/databricks-dq-framework/)
+[![GitHub](https://img.shields.io/badge/GitHub-MyDataToolHive-blue?logo=github)](https://github.com/nitmatgeo/MyDataToolHive/tree/main/databricks-dq-framework)
+
 A Python library for running **automated, configurable data quality checks** on Databricks Delta tables. Point it at your curated data, configure rules once, and it will check every row for empty fields, invalid formats, junk placeholder values, wrong data types, and custom business rules — then write the results directly back to the table and into a full audit log.
 
 ---

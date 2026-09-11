@@ -22,6 +22,12 @@ dependencies = [
     "pandas>=2.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/nitmatgeo/MyDataToolHive"
+Repository = "https://github.com/nitmatgeo/MyDataToolHive"
+"Source Code" = "https://github.com/nitmatgeo/MyDataToolHive/tree/main/databricks-dq-framework"
+"Bug Tracker" = "https://github.com/nitmatgeo/MyDataToolHive/issues"
+
 [project.optional-dependencies]
 standalone = [
     "pyspark>=3.3",

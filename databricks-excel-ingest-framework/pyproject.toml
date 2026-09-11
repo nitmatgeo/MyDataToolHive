@@ -19,6 +19,12 @@ dependencies = [
     "msoffcrypto-tool>=5.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/nitmatgeo/MyDataToolHive"
+Repository = "https://github.com/nitmatgeo/MyDataToolHive"
+"Source Code" = "https://github.com/nitmatgeo/MyDataToolHive/tree/main/databricks-excel-ingest-framework"
+"Bug Tracker" = "https://github.com/nitmatgeo/MyDataToolHive/issues"
+
 [project.optional-dependencies]
 databricks = [
     "databricks-sdk>=0.18.0",

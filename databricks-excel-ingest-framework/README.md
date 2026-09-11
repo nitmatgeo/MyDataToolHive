@@ -1,5 +1,8 @@
 # databricks-excel-ingest-framework
 
+[![PyPI](https://img.shields.io/pypi/v/databricks-excel-ingest-framework)](https://pypi.org/project/databricks-excel-ingest-framework/)
+[![GitHub](https://img.shields.io/badge/GitHub-MyDataToolHive-blue?logo=github)](https://github.com/nitmatgeo/MyDataToolHive/tree/main/databricks-excel-ingest-framework)
+
 > Stop writing one-off scripts for every Excel file. Let the framework figure out the structure, map the columns, and hand you clean, confident results — ready for Delta Lake.
 
 ---
