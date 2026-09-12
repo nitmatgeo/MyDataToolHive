@@ -113,15 +113,15 @@ dq.setup()
 
 # 2. Configure a field (ConfigManager API — no SQL required)
 cfg = dq.config
-cfg.register_field(1, "Source.SRC_ContactPoint.EMAIL_ADDRESS", data_category_type_id=4)
-cfg.set_field_values(1, "Source.SRC_ContactPoint.EMAIL_ADDRESS", min_data_length=6, max_data_length=255)
+cfg.register_field("Source.SRC_ContactPoint.EMAIL_ADDRESS", data_category_type_id=4, field_id=1)
+cfg.set_field_values("Source.SRC_ContactPoint.EMAIL_ADDRESS", config_id=1, min_data_length=6, max_data_length=255)
 cfg.block_category(1, "Source.SRC_ContactPoint.EMAIL_ADDRESS", "DataEmptiness")
 cfg.allow_pattern(2, "Source.SRC_ContactPoint.EMAIL_ADDRESS", "Has At Sign")
 cfg.add_custom_query_regex(1, "Source.SRC_ContactPoint.EMAIL_ADDRESS",
                            r"^[^@\s]+@[^@\s]+\.[^@\s]+$", must_match=True)
-cfg.add_mapping(1, "Source.SRC_ContactPoint.EMAIL_ADDRESS",
+cfg.add_mapping("Source.SRC_ContactPoint.EMAIL_ADDRESS",
                 target_schema_name="Curated", target_table_name="Entity_Email_Denorm",
-                target_field_name="EMAIL_ADDRESS", target_catalog_name="main")
+                target_field_name="EMAIL_ADDRESS", target_catalog_name="main", mapping_id=1)
 
 # 3. Verify config before generating
 cfg.verify_config()
@@ -673,12 +673,12 @@ Unit tests are available in the [source repository (Private)](https://github.com
 
 ## Adding a New Source Field
 
-1. Register the field: `cfg.register_field(id, "Schema.Table.Column", data_category_type_id=N)`
-2. Set length bounds: `cfg.set_field_values(id, ffn, min_data_length=M, max_data_length=N)`
+1. Register the field: `cfg.register_field("Schema.Table.Column", data_category_type_id=N, field_id=id)`
+2. Set length bounds: `cfg.set_field_values("Schema.Table.Column", config_id=id, min_data_length=M, max_data_length=N)`
 3. Add pattern rules: `cfg.block_category(...)`, `cfg.allow_pattern(...)`, `cfg.block_pattern(...)`
-4. Add custom expressions: `cfg.add_custom_query_regex(id, ffn, r"your_regex", must_match=True)`
+4. Add custom expressions: `cfg.add_custom_query_regex(id, "Schema.Table.Column", r"your_regex", must_match=True)`
 5. (Optional) Add custom invalid keywords: `dq.add_invalid_keyword("your_keyword", pattern_id=id)`
-6. Map to curated column: `cfg.add_mapping(id, ffn, target_schema_name=..., target_table_name=..., ...)`
+6. Map to curated column: `cfg.add_mapping("Schema.Table.Column", target_schema_name=..., target_table_name=..., mapping_id=id, ...)`
 7. Validate FK integrity: `cfg.verify_config()`
 8. Re-run: `dq.generate_rule_functions()`
 9. (Optional) Pre-flight SQL validation: `dq.validate_custom_queries_sql()`

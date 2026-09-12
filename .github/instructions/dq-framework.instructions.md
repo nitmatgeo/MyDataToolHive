@@ -110,23 +110,24 @@ Both patterns can coexist. Mix freely. `field_rule_summary("email_address")` acc
 
 ```python
 dq.config \
-    .register_field(<_id>, "email_address",      # Pattern A — reusable
-                    data_category_type_id=<category_id>) \
-    # OR: .register_field(<_id>, "Schema.Table.Column", ...)   # Pattern B — column-specific
+    .register_field("email_address",             # Pattern A — reusable
+                    data_category_type_id=<category_id>, field_id=<_id>) \
+    # OR: .register_field("Schema.Table.Column", data_category_type_id=<n>, field_id=<_id>)  # Pattern B
 
-    .set_field_values(<_id>, "email_address",
+    .set_field_values("email_address", config_id=<_id>,
                       min_data_length=<n>, max_data_length=<n>,
                       min_data_value=None, max_data_value=None) \
     .block_category(<_id>, "email_address", "<PatternCategory>") \
     .allow_pattern(<_id>, "email_address", "<PatternName>") \
-    .add_mapping(<_id>, "email_address",
+    .add_mapping("email_address",
                  target_schema_name="<schema>",
                  target_table_name="<table>",
                  target_field_name="<column>",
-                 target_catalog_name="<catalog>")
+                 target_catalog_name="<catalog>",
+                 mapping_id=<_id>)
 ```
 
-`FullFieldName` is always `Schema.Table.Column` — three parts, dot-separated.
+`FullFieldName` is either a short logical name (Pattern A) or `Schema.Table.Column` three dot-separated parts (Pattern B) — see the FullFieldName section above.
 
 ---
 
