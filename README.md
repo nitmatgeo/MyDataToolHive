@@ -10,6 +10,7 @@ A collection of open-source Python frameworks for Databricks — data quality as
 ## Articles
 
 - [🧰 DataToolHive | Excel files in Databricks — the combinations that break everything, and a framework built for all of them](https://www.linkedin.com/pulse/datatoolhive-excel-files-databricks-combinations-all-mathew-george-igfpc) — LinkedIn article on `databricks-excel-ingest-framework`
+- [🧰 DataToolHive | Data quality has two very different problems. This framework solves one of them.](https://www.linkedin.com/pulse/datatoolhive-data-quality-has-two-very-different-one-mathew-george-w0z9c) — LinkedIn article on `databricks-dq-framework`
 
 ---
 
