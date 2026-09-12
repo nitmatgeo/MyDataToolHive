@@ -37,6 +37,7 @@ Homepage = "https://github.com/nitmatgeo/MyDataToolHive"
 Repository = "https://github.com/nitmatgeo/MyDataToolHive"
 "Source Code" = "https://github.com/nitmatgeo/MyDataToolHive/tree/main/databricks-etl-monitor"
 "Bug Tracker" = "https://github.com/nitmatgeo/MyDataToolHive/issues"
+"Author" = "https://linkedin.com/in/nitmatgeo"
 
 [project.optional-dependencies]
 standalone = [

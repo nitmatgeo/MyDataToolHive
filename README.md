@@ -3,6 +3,13 @@
 A collection of open-source Python frameworks for Databricks — data quality assessment, ETL pipeline monitoring, and Excel ingestion into Delta Lake.
 
 [![GitHub](https://img.shields.io/badge/GitHub-MyDataToolHive-blue?logo=github)](https://github.com/nitmatgeo/MyDataToolHive)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-nitmatgeo-0A66C2?logo=linkedin)](https://linkedin.com/in/nitmatgeo)
+
+---
+
+## Articles
+
+- [🧰 DataToolHive | Excel files in Databricks — the combinations that break everything, and a framework built for all of them](https://www.linkedin.com/pulse/datatoolhive-excel-files-databricks-combinations-all-mathew-george-igfpc) — LinkedIn article on `databricks-excel-ingest-framework`
 
 ---
 
