@@ -2,6 +2,8 @@
 
 [![PyPI](https://img.shields.io/pypi/v/databricks-etl-monitor)](https://pypi.org/project/databricks-etl-monitor/)
 [![GitHub](https://img.shields.io/badge/GitHub-MyDataToolHive-blue?logo=github)](https://github.com/nitmatgeo/MyDataToolHive/tree/main/databricks-etl-monitor)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-nitmatgeo-0A66C2?logo=linkedin)](https://linkedin.com/in/nitmatgeo)
+[![Article](https://img.shields.io/badge/LinkedIn%20Article-DataToolHive-0A66C2?logo=linkedin)](https://www.linkedin.com/pulse/datatoolhive-databricks-etl-monitor-nitmatgeo-nitin-mathew-george-yoonc)
 
 A metadata-driven ETL process monitoring framework for Databricks / Delta Lake.
 
