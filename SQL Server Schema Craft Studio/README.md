@@ -1,6 +1,65 @@
 # SQL Server Schema Craft Studio
 
-This project contains PowerShell scripts to extract, compare, and summarize schema metadata from SQL Server databases. The scripts are designed to be modular, reusable, and maintainable.
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-nitmatgeo-0A66C2?logo=linkedin)](https://linkedin.com/in/nitmatgeo)
+[![Article](https://img.shields.io/badge/Article-SQL%20Server%20Schema%20Craft%20Studio-0A66C2?logo=linkedin)](https://www.linkedin.com/pulse/datatoolhive-sql-server-schema-craft-studio-nitmatgeo-mathew-george-dlrwc)
+
+A modular PowerShell toolkit for SQL Server schema change tracking. Compares two schema versions at column level — every field checked property by property, SHA256-verified — and outputs timestamped CSVs classifying what was Added, Deleted, Changed, or Unchanged.
+
+---
+
+## How it works (overview)
+
+```
+Step 0  →  Run SQL scripts (SQLCMD) against SQL Server  →  generates raw .dat dumps
+Step 1  →  Extract valid JSON from raw dumps             →  per-table JSON files
+Step 2  →  Merge schema + hierarchy JSON per table       →  enriched JSON files
+Step 3  →  Compare version (n) vs version (n-1)          →  ComparisonLog CSV
+Step 4  →  Summarise by table and column                 →  Summary + DetailedSummary CSVs
+```
+
+---
+
+## Step 0 — Generate raw metadata dumps from SQL Server
+
+Before running the PowerShell scripts, you must extract schema metadata from your SQL Server database using the two SQLCMD scripts in `Scripts/`.
+
+Both scripts use SQLCMD output directives (`:SETVAR` and `:OUT`) to write query results directly to `.dat` files. These directives are commented out by default — uncomment them before running.
+
+**Run in SQLCMD mode** (SSMS: Query → SQLCMD Mode, or `sqlcmd` from terminal).
+
+### SQL.01 — Schema Metadata Extract
+
+Extracts all column-level metadata: data types, nullability, FK relationships, extended properties, and a SHA256 hash per column.
+
+1. Open `Scripts\SQL.01.Schema Metadata Extract.sql`
+2. Uncomment and set the output path:
+   ```sql
+   :SETVAR OutputPath "C:\...\SQL Server Schema Craft Studio\Data\Inputs\version (n)"
+   ```
+3. Uncomment the output directive near the end:
+   ```sql
+   :OUT $(OutputPath)\00.rawSchemaMetadataOutput.dat
+   SELECT table_metadata FROM #MetadataSQLDB_JSON
+   ```
+4. Run against your target database → produces `00.rawSchemaMetadataOutput.dat`
+
+### SQL.02 — Generate Table Sequences (Hierarchy)
+
+Computes the table dependency hierarchy across the schema — section level, table level, schema priority — based on FK relationships.
+
+1. Open `Scripts\SQL.02.Generate Table Sequences.sql`
+2. Uncomment and set the output path:
+   ```sql
+   :SETVAR OutputPath "C:\...\SQL Server Schema Craft Studio\Data\Inputs\version (n)"
+   ```
+3. Uncomment the output directive near the end:
+   ```sql
+   :OUT $(OutputPath)\00.rawHierarchyOutput.dat
+   SELECT table_hierarchy FROM ...
+   ```
+4. Run against the same database → produces `00.rawHierarchyOutput.dat`
+
+**Repeat both scripts for `version (n-1)`**, pointing `OutputPath` to the `version (n-1)` folder.
 
 ---
 
@@ -8,7 +67,8 @@ This project contains PowerShell scripts to extract, compare, and summarize sche
 
 1. **PowerShell Version**: Ensure you are using PowerShell 5.1 or later.
 2. **NuGet Provider**: The script attempts to install the `NuGet` provider if it is not already installed.
-3. **Internet Access**: The script requires internet access to download the `Newtonsoft.Json` package from the NuGet repository. The script uses the `Newtonsoft.Json` library for JSON serialization and deserialization.
+3. **Internet Access**: Required to download the `Newtonsoft.Json` package from NuGet (used for JSON serialisation).
+4. **SQL Server + SQLCMD**: Required to run Step 0. Use SSMS with SQLCMD Mode enabled, or the `sqlcmd` command-line tool.
 
 ## Modular PowerShell Scripts
 
@@ -37,15 +97,21 @@ Modular PowerShell scripts are scripts that are broken down into smaller, reusab
 
 ### Modular Structure of This Project
 
-This project is organized into the following modular scripts:
 ```
-SchemaMetadataProject/
-│
-├── SchemaMetadataExtract.ps1       # Handles JSON extraction and processing
-├── SchemaMetadataComparator.ps1    # Handles comparison between versions
-├── SchemaMetadataSummary.ps1       # Handles classification and summary generation
-├── Main.ps1                        # Orchestrates the workflow
-└── Utils.ps1                       # Shared utility functions (e.g., logging)
+SQL Server Schema Craft Studio/
+├── msql.PowerShell.SCS.Main.ps1          # Orchestrates the full pipeline
+├── Scripts/
+│   ├── SQL.01.Schema Metadata Extract.sql    # SQLCMD: extracts column metadata → rawSchemaMetadataOutput.dat
+│   └── SQL.02.Generate Table Sequences.sql   # SQLCMD: computes table hierarchy → rawHierarchyOutput.dat
+└── Modules/
+    ├── processMetadata/                  # Extract valid JSON + split + merge raw dumps
+    │   └── msql.PowerShell.SCS.processMetadata.psm1
+    ├── metadataComparator/               # Column-level diff (n vs n-1), SHA256-verified
+    │   └── msql.PowerShell.SCS.metadataComparator.psm1
+    ├── comparatorSummary/                # Table + column summary generation
+    │   └── msql.PowerShell.SCS.comparatorSummary.psm1
+    └── Utils/                            # Logging (Log-Message)
+        └── msql.PowerShell.SCS.Utils.psm1
 ```
 
 1. **`SchemaMetadataExtract.ps1`**:

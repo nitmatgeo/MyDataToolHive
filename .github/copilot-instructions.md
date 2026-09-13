@@ -29,6 +29,7 @@ Scoped instruction files live in `.github/instructions/` and are loaded automati
 | `dq-framework.instructions.md` | `databricks-dq-framework/**` |
 | `etl-monitor.instructions.md` | `databricks-etl-monitor/**` |
 | `excel-ingest.instructions.md` | `databricks-excel-ingest-framework/**` |
+| `sql-server-schema-craft-studio.instructions.md` | `SQL Server Schema Craft Studio/**` |
 
 ---
 
