@@ -1,4 +1,20 @@
 -- :SETVAR OutputPath "C:\Users\...\SQL Server Schema Craft Studio\Data\Inputs\version (n)"
+
+/*--<< CONFIGURE >>--**************************************************************************************************************************
+	Set the schema names that exist in your database and assign a priority order.
+	Lower number = higher priority (appears earlier in the hierarchy).
+	Schemas not listed here will have NULL priority and sort last.
+	Add or remove rows to match your database's naming convention.
+******--------------------------------------------------------------------------------------------------------------------------------------******/
+	IF OBJECT_ID('tempdb..#UserSchemaPriority') IS NOT NULL DROP TABLE #UserSchemaPriority
+	CREATE TABLE #UserSchemaPriority (schema_name VARCHAR(255), schema_priority INT)
+	INSERT INTO #UserSchemaPriority (schema_name, schema_priority) VALUES
+		('schema_a', 1),
+		('schema_b', 2),
+		('schema_c', 3),
+		('schema_d', 4)
+/*--<< END CONFIGURE >>--*********************************************************************************************************************/
+
 /*--<< STEP 00-A >>--*****************************************************************************************************************************
 	(i)		Extract the Schema & Database Metadata across all tables in-scope
 ******--------------------------------------------------------------------------------------------------------------------------------------******/
@@ -74,20 +90,17 @@
 	(i)		Extract the Schema in-scope and define its order
 ******--------------------------------------------------------------------------------------------------------------------------------------******/
 	IF OBJECT_ID('tempdb..#SchemaOrder') IS NOT NULL DROP TABLE #SchemaOrder
-	SELECT 
+	SELECT
 		X.schema_name,
-		CASE	WHEN X.schema_name = 'reference' THEN 1
-				WHEN X.schema_name = 'master' THEN 2
-				WHEN X.schema_name = 'regulatory' THEN 3
-				WHEN X.schema_name = 'transactional' THEN 4
-				ELSE NULL
-			END AS schema_priority
+		USP.schema_priority
 	INTO #SchemaOrder
 	FROM
 	(	SELECT DISTINCT schema_name FROM #AllObjectsDB
 		UNION
 		SELECT DISTINCT referenced_schema_name FROM #AllObjectsDB WHERE referenced_schema_name IS NOT NULL AND referenced_schema_name NOT IN ('<Primary Key>')
 	)X
+	LEFT JOIN #UserSchemaPriority USP 
+		ON USP.schema_name = X.schema_name
 
 	/*--<< Debug >>--------------------------------------------------------------------------------------------------------------------------------
 		SELECT * FROM #SchemaOrder
@@ -360,27 +373,27 @@
 		SET
 			parent_table_level = (SELECT MAX(ISNULL(parent_table_level, 0)) FROM #AllMidLevelTables) + 1
 		FROM #AllMidLevelTables A
-		JOIN 
+		JOIN
 		(
-			SELECT DISTINCT 
-				parent_schema_name, 
-				parent_table_name 
-			FROM 
+			SELECT DISTINCT
+				parent_schema_name,
+				parent_table_name
+			FROM
 				#AllMidLevelTables P
 			WHERE 1 = 1
 				AND parent_table_level IS NULL
 				AND NOT EXISTS (
-					SELECT 1 
+					SELECT 1
 					FROM #AllMidLevelTables C
 					WHERE parent_table_level IS NULL
-						AND P.parent_schema_name = C.child_schema_name 
+						AND P.parent_schema_name = C.child_schema_name
 						AND P.parent_table_name = C.child_table_name
 				)
 		)X
 			ON X.parent_schema_name = A.parent_schema_name
 			AND X.parent_table_name = A.parent_table_name
-		
-		IF @@ROWCOUNT = 0 
+
+		IF @@ROWCOUNT = 0
 			BREAK;
 	END;
 	/*--<< Debug >>--------------------------------------------------------------------------------------------------------------------------------
@@ -487,9 +500,9 @@
 	BEGIN
 		UPDATE L
 		SET
-			_level = 
+			_level =
 				(
-					SELECT 
+					SELECT
 						MAX(L2.ID) + 1 AS ID
 					FROM #MissedOutTables M
 					JOIN #ListTablesMissedOut L1
@@ -504,7 +517,7 @@
 				)
 		FROM #ListTablesMissedOut L
 		WHERE ID = @rowCount
-	
+
 		SET @rowCount = @rowCount - 1
 	END
 
